@@ -3,6 +3,7 @@ import {
     resolvePlaylistImage,
     resolveTrackImage,
 } from './playlist-media.js'
+import { resolveImageSource } from './file-path.js'
 import { normalizeTrackRecord } from './track-record.js'
 
 export async function resolveTrackArtwork(track, { audioService = window.audioService } = {}) {
@@ -13,7 +14,7 @@ export async function resolveTrackArtwork(track, { audioService = window.audioSe
 
     const existingImage = resolveTrackImage(normalizedTrack)
     if (existingImage) {
-        return existingImage
+        return resolveImageSource(existingImage)
     }
 
     if (typeof audioService?.resolveTrackMetadata !== 'function') {
@@ -23,7 +24,7 @@ export async function resolveTrackArtwork(track, { audioService = window.audioSe
     const metadata = await audioService.resolveTrackMetadata(normalizedTrack.filePath, {
         includeImage: true,
     })
-    return metadata?.image || ''
+    return resolveImageSource(metadata?.image)
 }
 
 export async function resolvePlaylistArtwork(
@@ -36,7 +37,7 @@ export async function resolvePlaylistArtwork(
 
     const existingImage = resolvePlaylistImage(playlist)
     if (existingImage && existingImage !== DEFAULT_PLAYLIST_IMAGE) {
-        return existingImage
+        return resolveImageSource(existingImage)
     }
 
     const tracks = Array.isArray(playlist.tracks) ? playlist.tracks : []
@@ -45,7 +46,7 @@ export async function resolvePlaylistArtwork(
         ? await resolveTrackArtwork(firstTrack, { audioService })
         : DEFAULT_PLAYLIST_IMAGE
 
-    return trackArtwork || DEFAULT_PLAYLIST_IMAGE
+    return resolveImageSource(trackArtwork) || DEFAULT_PLAYLIST_IMAGE
 }
 
 export async function hydrateImageWithTrackArtwork({

@@ -23,7 +23,11 @@ const Sidebar = () => {
         <div className="topLevelSidebar">
             <nav className="flex flex-col items-start">
                 {navItems.map((item) => (
-                    <Link key={item.path} to={item.path} className="underline text-[#001aff]">
+                    <Link
+                        key={item.path}
+                        to={item.path}
+                        className="underline text-(--accent-color) font-semibold hover:text-(--hover-color)"
+                    >
                         {item.label}
                     </Link>
                 ))}

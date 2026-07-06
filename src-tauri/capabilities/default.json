@@ -10,8 +10,28 @@
         "fs:default",
         {
             "identifier": "fs:allow-exists",
-            "allow": [{ "path": "$APPDATA/*" }]
+            "allow": [
+                {
+                    "path": "$APPDATA/*"
+                }
+            ]
         },
+        "fs:allow-mkdir",
+        {
+            "identifier": "fs:allow-mkdir",
+            "allow": ["$APPDATA/**"]
+        },
+        {
+            "identifier": "fs:allow-write-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/artwork/**"
+                }
+            ]
+        },
+        "fs:allow-read",
+        "fs:allow-app-meta",
+        "fs:write-files",
         "opener:default",
         "store:default"
     ]

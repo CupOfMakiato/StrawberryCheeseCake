@@ -11,7 +11,12 @@ function normalizeTrackImage(value) {
     }
 
     const image = value.trim()
-    if (!image || image.startsWith('data:image/')) {
+    if (
+        !image ||
+        image.startsWith('data:image/') ||
+        image.startsWith('blob:') ||
+        image.startsWith('file:')
+    ) {
         return DEFAULT_TRACK_IMAGE
     }
 

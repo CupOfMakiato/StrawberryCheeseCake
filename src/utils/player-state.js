@@ -9,12 +9,12 @@ export const playerState = (() => {
             duration: 0,
             percent: 0,
         },
-        volume: 0.7,
+        volume: 0.5,
         currentTrack: {
             filePath: null,
             title: 'No song selected',
             artist: 'Unknown artist',
-            image: './assets/music-placeholder.png',
+            image: null,
         },
     }
     const listeners = []
@@ -150,7 +150,7 @@ export const playerState = (() => {
             filePath: null,
             title: 'No song selected',
             artist: 'Unknown artist',
-            image: './assets/music-placeholder.png',
+            image: null,
         }
         notify()
     }

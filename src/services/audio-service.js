@@ -1,26 +1,33 @@
 import { Howl, Howler } from 'howler'
+import jsmediatags from 'jsmediatags/dist/jsmediatags.min.js'
 import { playerState as state } from '../utils/player-state.js'
 import { sessionService } from './session-service.js'
 import {
     // toFileUrl,
     getBaseName,
 } from '../utils/file-path.js'
-import { readFile } from '@tauri-apps/plugin-fs'
+import { readFile, writeFile, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs'
+import { appDataDir, join } from '@tauri-apps/api/path'
 
 export const audioService = (() => {
-    const DEFAULT_VOLUME = 0.7
+    const DEFAULT_VOLUME = 0.5
     const METADATA_DEBUG_ENABLED = true
+    const VOLUME_DEBUG_ENABLED = true
     const UNKNOWN_TITLE_LABEL = 'Unknown Title'
     const UNKNOWN_ARTIST_LABEL = 'Unknown Artist'
     const UNKNOWN_ALBUM_LABEL = 'Unknown Album'
     const METADATA_CACHE_LIMIT = 240
     const SUPPORTED_AUDIO_EXTENSIONS = ['.mp3', '.wav']
+    const ARTWORK_DIR_NAME = 'artwork'
     const metadataCache = new Map()
     const artworkCache = new Map()
     const metadataInFlight = new Map()
+    let artworkDirPromise = null
 
     let currentSound = null
     let playbackPersistTimer = null
+    let progressUpdateTimer = null
+    let lastLoggedVolume = null
 
     function normalizeVolume(value) {
         const parsed = Number(value)
@@ -39,6 +46,15 @@ export const audioService = (() => {
         //     // fileName,
         //     ...payload,
         // })
+    }
+
+    function logVolumeDebug(...args) {
+        if (!VOLUME_DEBUG_ENABLED) return
+        try {
+            console.log('[audio-debug]', ...args)
+        } catch {
+            // ignore
+        }
     }
 
     function buildFallbackTrackData(filePath) {
@@ -72,22 +88,15 @@ export const audioService = (() => {
         return SUPPORTED_AUDIO_EXTENSIONS.some((extension) => normalizedPath.endsWith(extension))
     }
 
-    // function logResolvedMetadataDebug(filePath, fallbackTitle, rawTags, source) {
-    //     logMetadataDebug(filePath, 'metadata-loaded', {
-    //         fallbackTitle,
-    //         source,
-    //         title: rawTags?.title || null,
-    //         artist: rawTags?.artist || null,
-    //         album: rawTags?.album || null,
-    //         year: rawTags?.year || null,
-    //         genre: rawTags?.genre || null,
-    //         track: rawTags?.track || null,
-    //         disc: rawTags?.disc || null,
-    //         hasPicture: Boolean(rawTags?.image),
-    //         pictureFormat: rawTags?.pictureFormat || null,
-    //         pictureBytes: rawTags?.pictureBytes || 0,
-    //     })
-    // }
+    function revokeArtworkUrl(url) {
+        if (typeof url === 'string' && url.startsWith('blob:')) {
+            try {
+                URL.revokeObjectURL(url)
+            } catch {
+                // Ignore — URL may have already been revoked
+            }
+        }
+    }
 
     function rememberMetadata(filePath, metadata) {
         if (metadataCache.has(filePath)) {
@@ -111,6 +120,7 @@ export const audioService = (() => {
 
     function rememberArtwork(filePath, image) {
         if (artworkCache.has(filePath)) {
+            revokeArtworkUrl(artworkCache.get(filePath))
             artworkCache.delete(filePath)
         }
 
@@ -122,35 +132,107 @@ export const audioService = (() => {
 
         const oldestKey = artworkCache.keys().next().value
         if (oldestKey) {
+            revokeArtworkUrl(artworkCache.get(oldestKey))
             artworkCache.delete(oldestKey)
         }
     }
 
-    async function readMetadata(filePath, fallbackTitle, { includeImage = false } = {}) {
-        if (!window.electronAPI?.readAudioMetadata) {
-            logMetadataDebug(filePath, 'metadata-api-missing', {
-                fallbackTitle,
+    async function hashTrackPath(filePath) {
+        const value = String(filePath || '')
+        const encoder = new TextEncoder()
+
+        if (globalThis.crypto?.subtle?.digest) {
+            const digest = await globalThis.crypto.subtle.digest(
+                'SHA-1',
+                encoder.encode(value),
+            )
+            return Array.from(new Uint8Array(digest))
+                .map((byte) => byte.toString(16).padStart(2, '0'))
+                .join('')
+        }
+
+        return Array.from(value)
+            .map((char) => char.codePointAt(0).toString(16).padStart(2, '0'))
+            .join('')
+    }
+
+    function getArtworkExtension(format) {
+        const normalized = String(format || '').toLowerCase()
+
+        if (normalized.includes('png')) return '.png'
+        if (normalized.includes('webp')) return '.webp'
+        if (normalized.includes('gif')) return '.gif'
+        if (normalized.includes('jpeg') || normalized.includes('jpg')) return '.jpg'
+
+        return '.img'
+    }
+
+    async function ensureArtworkDirectory() {
+        if (!artworkDirPromise) {
+            artworkDirPromise = (async () => {
+                await mkdir(ARTWORK_DIR_NAME, {
+                    baseDir: BaseDirectory.AppData,
+                    recursive: true,
+                })
+
+                const baseDir = await appDataDir()
+                return join(baseDir, ARTWORK_DIR_NAME)
+            })().catch((error) => {
+                artworkDirPromise = null
+                throw error
             })
+        }
+
+        return artworkDirPromise
+    }
+
+    async function persistArtwork(filePath, picture) {
+        const data = picture?.data
+        if (!filePath || !data) {
             return null
         }
 
         try {
-            const rawTags = await window.electronAPI.readAudioMetadata(filePath, { includeImage })
+            await ensureArtworkDirectory()
+            const fileName = `${await hashTrackPath(filePath)}${getArtworkExtension(
+                picture?.format,
+            )}`
+            const relativePath = `${ARTWORK_DIR_NAME}/${fileName}`
+            const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
+            await writeFile(relativePath, bytes, { baseDir: BaseDirectory.AppData })
 
-            if (!rawTags) {
-                logMetadataDebug(filePath, 'metadata-empty', {
-                    fallbackTitle,
-                    source: 'main-process',
+            const baseDir = await appDataDir()
+            return join(baseDir, relativePath)
+        } catch (error) {
+            console.error('Failed to persist artwork:', error)
+            return null
+        }
+    }
+
+    async function readMetadata(filePath, fallbackTitle, { includeImage = false } = {}) {
+        try {
+            const bytes = await readFile(filePath)
+            const blob = new Blob([bytes]) // keep the Blob
+
+            const rawTags = await new Promise((resolve, reject) => {
+                jsmediatags.read(blob, {
+                    onSuccess: (tag) => resolve(tag.tags),
+                    onError: reject,
                 })
-                return null
+            })
+
+            let image = null
+            if (includeImage && rawTags?.picture) {
+                image = await persistArtwork(filePath, rawTags.picture)
             }
 
-            // logResolvedMetadataDebug(filePath, fallbackTitle, rawTags, 'main-process')
-            return buildResolvedMetadataFromTags(rawTags, fallbackTitle)
+            return buildResolvedMetadataFromTags(
+                { title: rawTags?.title, artist: rawTags?.artist, album: rawTags?.album, image },
+                fallbackTitle,
+            )
         } catch (error) {
             logMetadataDebug(filePath, 'metadata-read-error', {
                 fallbackTitle,
-                source: 'main-process',
                 error: getMetadataErrorMessage(error),
             })
             return null
@@ -161,6 +243,10 @@ export const audioService = (() => {
         if (playbackPersistTimer) {
             window.clearInterval(playbackPersistTimer)
             playbackPersistTimer = null
+        }
+        if (progressUpdateTimer) {
+            window.clearInterval(progressUpdateTimer)
+            progressUpdateTimer = null
         }
     }
 
@@ -199,6 +285,18 @@ export const audioService = (() => {
         playbackPersistTimer = window.setInterval(() => {
             savePlaybackSnapshot()
         }, 1000)
+        // update UI progress regularly while playing
+        progressUpdateTimer = window.setInterval(() => {
+            try {
+                if (!currentSound || typeof currentSound.seek !== 'function') return
+                const currentTime = Number(currentSound.seek() || 0)
+                const duration = Number(currentSound.duration() || 0)
+                const percent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0
+                state.setProgress({ currentTime, duration, percent })
+            } catch {
+                // ignore occasional seek errors
+            }
+        }, 500)
     }
 
     async function resolveTrackMetadata(filePath, options = {}) {
@@ -270,6 +368,59 @@ export const audioService = (() => {
         resolveTrackMetadata(nextFilePath, { includeImage: false }).catch(() => {
             // Ignore prewarm failures; playback should not be blocked by metadata.
         })
+    }
+
+    async function restoreSavedPlaylist({ playlist, currentTrackIndex, playbackPosition } = {}) {
+        if (!Array.isArray(playlist) || playlist.length === 0) {
+            return
+        }
+
+        const normalizedPlaylist = playlist.filter(isSupportedAudioFile)
+        if (normalizedPlaylist.length === 0) {
+            return
+        }
+
+        const index = Number.isInteger(currentTrackIndex) ? currentTrackIndex : 0
+        if (index < 0 || index >= normalizedPlaylist.length) {
+            return
+        }
+
+        const filePath = normalizedPlaylist[index]
+        state.setPlaylist(normalizedPlaylist)
+        state.setCurrentTrack({ filePath, ...buildFallbackTrackData(filePath) })
+        state.setCurrentTrackIndex(index)
+
+        if (Number.isFinite(Number(playbackPosition)) && playbackPosition >= 0) {
+            state.setProgress({ currentTime: Number(playbackPosition), duration: 0, percent: 0 })
+        }
+
+        try {
+            const trackData = await resolveTrackMetadata(filePath, { includeImage: true })
+            const { playlist: latestPlaylist, currentTrackIndex: latestIndex } = state.getState()
+            const isSameTrack =
+                Array.isArray(latestPlaylist) &&
+                latestPlaylist[latestIndex] === filePath &&
+                latestIndex === index
+
+            if (isSameTrack) {
+                state.setCurrentTrack(trackData)
+            }
+        } catch {
+            // Metadata enrichment failure should not impact restore.
+        }
+    }
+
+    async function restoreSavedPlaylistFromStore() {
+        if (!sessionService?.loadPlaylist) {
+            return
+        }
+
+        try {
+            const savedSession = await sessionService.loadPlaylist()
+            await restoreSavedPlaylist(savedSession)
+        } catch (error) {
+            console.error('Failed to restore saved playlist from store:', error)
+        }
     }
 
     function clearCurrentMusic() {
@@ -378,7 +529,6 @@ export const audioService = (() => {
         }
 
         const { volume } = state.getState()
-        console.log('Playing track with volume:', volume)
 
         currentSound = new Howl({
             src: [objectUrl],
@@ -470,21 +620,6 @@ export const audioService = (() => {
         }
     }
 
-    // let isToggling = false;
-
-    // function togglePlayPause() {
-    // 	if (!music || isToggling) return;
-    // 	isToggling = true;
-
-    // 	if (music.playing()) {
-    // 		music.pause();
-    // 	} else {
-    // 		music.play();
-    // 	}
-
-    // 	setTimeout(() => { isToggling = false; }, 300);
-    // }
-
     function startPlaylist(filePaths) {
         if (!state) return
         if (!Array.isArray(filePaths) || filePaths.length === 0) return
@@ -522,7 +657,6 @@ export const audioService = (() => {
             Howler.volume(normalizedVolume)
         }
         state.setVolume(normalizedVolume)
-
         sessionService?.saveVolume(normalizedVolume)
     }
 
@@ -542,6 +676,30 @@ export const audioService = (() => {
     }
 
     initializeVolumeFromStore()
+    restoreSavedPlaylistFromStore()
+
+    // subscribe to playerState changes and log volume updates for debugging
+    try {
+        lastLoggedVolume = state.getState().volume
+        state.subscribe((snapshot) => {
+            try {
+                if (
+                    snapshot &&
+                    typeof snapshot.volume === 'number' &&
+                    snapshot.volume !== lastLoggedVolume
+                ) {
+                    logVolumeDebug('playerState.volume.changed', {
+                        current: snapshot.volume,
+                    })
+                    lastLoggedVolume = snapshot.volume
+                }
+            } catch {
+                // ignore
+            }
+        })
+    } catch {
+        // ignore subscription errors
+    }
 
     window.addEventListener('beforeunload', () => {
         savePlaybackSnapshot()
@@ -570,5 +728,31 @@ export const audioService = (() => {
         clearCurrentMusic,
         getTrackDisplayData,
         resolveTrackMetadata,
+        restoreSavedPlaylist,
+        restoreSavedPlaylistFromStore,
+        debugVolume: () => {
+            try {
+                return {
+                    stateVolume: state.getState().volume,
+                    howlerVolume:
+                        Howler && typeof Howler.volume === 'function' ? Howler.volume() : null,
+                    currentSoundVolume:
+                        currentSound && typeof currentSound.volume === 'function'
+                            ? currentSound.volume()
+                            : null,
+                }
+            } catch {
+                return null
+            }
+        },
     }
 })()
+
+// Expose for easy debugging in DevTools
+try {
+    if (typeof window !== 'undefined' && window) {
+        window.audioService = audioService
+    }
+} catch {
+    // ignore
+}

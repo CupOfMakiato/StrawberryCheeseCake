@@ -6,6 +6,8 @@
     --cursor-grab: url('./assets/cursor-drag.png') 10 10, grab;
     --cursor-grabbing: url('./assets/cursor-drag-clicked.png') 10 10, grabbing;
     --cursor-text: url('./assets/cursor-text.png') 1 10, text;
+    --accent-color: #d5194b;
+    --hover-color: #ac1c42;
 }
 
 #coverImage {
@@ -61,6 +63,11 @@ body.cursor-grabbing * {
 
 .cursor-text {
     cursor: var(--cursor-text) !important;
+}
+
+input[type='range'] {
+    accent-color: var(--accent-color) !important;
+    cursor: var(--cursor-auto) !important;
 }
 
 .appShell {

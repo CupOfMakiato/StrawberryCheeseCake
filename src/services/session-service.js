@@ -1,3 +1,4 @@
+import { Store } from '@tauri-apps/plugin-store'
 import { getBaseName } from '../utils/file-path.js'
 import { normalizePlaylistImageValue, resolveTrackImage } from '../utils/playlist-media.js'
 import { normalizeTrackRecord } from '../utils/track-record.js'
@@ -8,6 +9,87 @@ export const sessionService = (() => {
     const MAX_RECENT_FOLDER_PLAYLISTS = 8
     const MAX_RECENT_FOLDER_TRACKS = 300
     const USER_PLAYLISTS_KEY = 'strawberry-cheesecake:user-playlists'
+    const SETTINGS_STORE_PATH = 'settings.json'
+    const SETTINGS_STORE_DEFAULTS = {
+        playerVolume: DEFAULT_VOLUME,
+        recentPlaylist: [],
+        recentPlaylistIndex: -1,
+        recentPlaybackPosition: 0,
+        recentTracks: [],
+        approvedAudioPaths: [],
+    }
+
+    let settingsStorePromise = null
+
+    async function getSettingsStore() {
+        if (typeof window === 'undefined') {
+            return null
+        }
+
+        if (settingsStorePromise) {
+            return settingsStorePromise
+        }
+
+        settingsStorePromise = Store.load(SETTINGS_STORE_PATH, {
+            defaults: SETTINGS_STORE_DEFAULTS,
+            autoSave: true,
+        })
+            .then(async (store) => {
+                try {
+                    const keys = await store.keys()
+                    const missingDefaults = Object.entries(SETTINGS_STORE_DEFAULTS).filter(
+                        ([key]) => !keys.includes(key),
+                    )
+
+                    if (missingDefaults.length > 0) {
+                        await Promise.all(
+                            missingDefaults.map(([key, value]) => store.set(key, value)),
+                        )
+                        await store.save()
+                    }
+                } catch (error) {
+                    console.error('Failed to initialize default settings:', error)
+                }
+                return store
+            })
+            .catch((error) => {
+                console.error('Failed to initialize settings store:', error)
+                settingsStorePromise = null
+                return null
+            })
+
+        return settingsStorePromise
+    }
+
+    async function getSettingsValue(key, fallback) {
+        const store = await getSettingsStore()
+        if (!store) {
+            return fallback
+        }
+
+        try {
+            const value = await store.get(key)
+            return value === undefined ? fallback : value
+        } catch (error) {
+            console.error(`Failed to read settings key "${key}":`, error)
+            return fallback
+        }
+    }
+
+    async function setSettingsValue(key, value) {
+        const store = await getSettingsStore()
+        if (!store) {
+            return false
+        }
+
+        try {
+            await store.set(key, value)
+            return true
+        } catch (error) {
+            console.error(`Failed to save settings key "${key}":`, error)
+            return false
+        }
+    }
 
     const RECENT_FOLDER_PLAYLISTS_KEY = 'strawberry-cheesecake:recent-folder-playlists'
     const EMBEDDED_IMAGE_PREFIX = 'data:image/'
@@ -119,12 +201,8 @@ export const sessionService = (() => {
     }
 
     async function loadSavedVolume() {
-        if (!hasAPI('getSavedVolume')) {
-            return DEFAULT_VOLUME
-        }
-
         try {
-            const value = await window.electronAPI.getSavedVolume()
+            const value = await getSettingsValue('playerVolume', DEFAULT_VOLUME)
             return normalizeVolume(value)
         } catch (error) {
             console.error('Failed to load saved volume:', error)
@@ -133,13 +211,10 @@ export const sessionService = (() => {
     }
 
     async function saveVolume(volume) {
-        if (!hasAPI('saveVolume')) {
-            return false
-        }
+        const normalized = normalizeVolume(volume)
 
         try {
-            await window.electronAPI.saveVolume(normalizeVolume(volume))
-            return true
+            return await setSettingsValue('playerVolume', normalized)
         } catch (error) {
             console.error('Failed to persist volume:', error)
             return false
@@ -147,46 +222,53 @@ export const sessionService = (() => {
     }
 
     async function loadPlaylist() {
-        if (!hasAPI('loadPlaylist')) {
-            return { playlist: [], currentTrackIndex: -1, playbackPosition: 0 }
-        }
-
         try {
-            const result = await window.electronAPI.loadPlaylist()
-            const playbackPosition = Number(result?.playbackPosition)
+            const playlist = await getSettingsValue('recentPlaylist', [])
+            const currentTrackIndex = Number(await getSettingsValue('recentPlaylistIndex', -1))
+            const playbackPosition = Number(await getSettingsValue('recentPlaybackPosition', 0))
+
+            // Sanitize playlist entries: stored blob URLs are session-scoped and invalid
+            // after restart — only return persisted real file paths.
+            const sanitized = Array.isArray(playlist)
+                ? playlist.filter(
+                      (p) => typeof p === 'string' && p.trim() && !p.trim().startsWith('blob:'),
+                  )
+                : []
+
             return {
-                playlist: Array.isArray(result?.playlist) ? result.playlist : [],
-                currentTrackIndex: Number.isInteger(result?.currentTrackIndex)
-                    ? result.currentTrackIndex
-                    : -1,
+                playlist: sanitized,
+                currentTrackIndex: Number.isInteger(currentTrackIndex) ? currentTrackIndex : -1,
                 playbackPosition:
                     Number.isFinite(playbackPosition) && playbackPosition >= 0
                         ? playbackPosition
                         : 0,
             }
         } catch (error) {
-            console.error('Failed to load playlist:', error)
+            console.error('Failed to load playlist from settings store:', error)
             return { playlist: [], currentTrackIndex: -1, playbackPosition: 0 }
         }
     }
 
     async function savePlaylist(playlist, currentTrackIndex, playbackPosition = 0) {
-        if (!hasAPI('savePlaylist')) {
-            return false
-        }
+        // Prevent saving transient blob: URLs (object URLs) into persistent storage.
+        const safePlaylist = Array.isArray(playlist)
+            ? playlist.filter(
+                  (p) => typeof p === 'string' && p.trim() && !p.trim().startsWith('blob:'),
+              )
+            : []
+        const safeIndex = Number.isInteger(currentTrackIndex) ? currentTrackIndex : -1
+        const parsedPosition = Number(playbackPosition)
+        const safePlaybackPosition =
+            Number.isFinite(parsedPosition) && parsedPosition >= 0 ? parsedPosition : 0
 
         try {
-            const safePlaylist = Array.isArray(playlist) ? playlist : []
-            const safeIndex = Number.isInteger(currentTrackIndex) ? currentTrackIndex : -1
-            const parsedPosition = Number(playbackPosition)
-            const safePlaybackPosition =
-                Number.isFinite(parsedPosition) && parsedPosition >= 0 ? parsedPosition : 0
-            const saved = await window.electronAPI.savePlaylist(
-                safePlaylist,
-                safeIndex,
+            const savedPlaylist = await setSettingsValue('recentPlaylist', safePlaylist)
+            const savedIndex = await setSettingsValue('recentPlaylistIndex', safeIndex)
+            const savedPosition = await setSettingsValue(
+                'recentPlaybackPosition',
                 safePlaybackPosition,
             )
-            return Boolean(saved)
+            return savedPlaylist && savedIndex && savedPosition
         } catch (error) {
             console.error('Failed to persist playlist:', error)
             return false
@@ -221,40 +303,58 @@ export const sessionService = (() => {
     }
 
     async function loadRecentTracks() {
-        if (!hasAPI('loadRecentTracks')) {
-            return []
-        }
-
         try {
-            const tracks = await window.electronAPI.loadRecentTracks()
+            const tracks = await getSettingsValue('recentTracks', [])
             return Array.isArray(tracks)
                 ? tracks.map((track) => normalizeTrackRecord(track)).filter(Boolean)
                 : []
         } catch (error) {
-            console.error('Failed to load recent tracks:', error)
+            console.error('Failed to load recent tracks from settings store:', error)
             return []
         }
     }
 
     async function saveRecentTracks(tracks) {
-        if (!hasAPI('saveRecentTracks')) {
+        const safeTracks = Array.isArray(tracks)
+            ? tracks
+                  .map((track) => normalizeTrackRecord(track))
+                  .filter(Boolean)
+                  .slice(0, MAX_RECENT_TRACKS)
+            : []
+
+        try {
+            const saved = await setSettingsValue('recentTracks', safeTracks)
+            if (saved) {
+                window.dispatchEvent(new CustomEvent('recent-tracks:updated'))
+            }
+            return saved
+        } catch (error) {
+            console.error('Failed to save recent tracks:', error)
+            return false
+        }
+    }
+
+    async function approveRecentAudioPath(filePath) {
+        if (!filePath || typeof filePath !== 'string') {
             return false
         }
 
         try {
-            const safeTracks = Array.isArray(tracks)
-                ? tracks
-                      .map((track) => normalizeTrackRecord(track))
-                      .filter(Boolean)
-                      .slice(0, MAX_RECENT_TRACKS)
-                : []
-            const saved = await window.electronAPI.saveRecentTracks(safeTracks)
-            if (saved) {
-                window.dispatchEvent(new CustomEvent('recent-tracks:updated'))
+            const existing = await getSettingsValue('approvedAudioPaths', [])
+            const approved = Array.isArray(existing) ? [...existing] : []
+            const normalizedPath = filePath.trim()
+            if (!normalizedPath) {
+                return false
             }
-            return Boolean(saved)
+
+            if (!approved.includes(normalizedPath)) {
+                approved.push(normalizedPath)
+                return setSettingsValue('approvedAudioPaths', approved)
+            }
+
+            return true
         } catch (error) {
-            console.error('Failed to save recent tracks:', error)
+            console.error('Failed to approve recent audio path:', error)
             return false
         }
     }
@@ -271,19 +371,6 @@ export const sessionService = (() => {
         )
 
         return saveRecentTracks(updated)
-    }
-
-    async function approveRecentAudioPath(filePath) {
-        if (!hasAPI('approveRecentAudioPath')) {
-            return false
-        }
-
-        try {
-            return Boolean(await window.electronAPI.approveRecentAudioPath(filePath))
-        } catch (error) {
-            console.error('Failed to approve recent audio path:', error)
-            return false
-        }
     }
 
     function normalizeUserPlaylists(playlists, { initializeMissingCovers = false } = {}) {

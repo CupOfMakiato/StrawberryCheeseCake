@@ -6,7 +6,12 @@ export function normalizePlaylistImageValue(value) {
     }
 
     const image = value.trim()
-    if (!image || image.startsWith('data:image/')) {
+    if (
+        !image ||
+        image.startsWith('data:image/') ||
+        image.startsWith('blob:') ||
+        image.startsWith('file:')
+    ) {
         return ''
     }
 
