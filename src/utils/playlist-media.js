@@ -1,4 +1,4 @@
-export const DEFAULT_PLAYLIST_IMAGE = './assets/music-placeholder.png'
+export const DEFAULT_PLAYLIST_IMAGE = './assets/IMG_6103.webp'
 
 export function normalizePlaylistImageValue(value) {
     if (typeof value !== 'string') {
@@ -27,7 +27,7 @@ export function resolveTrackImage(track) {
     return candidates.map(normalizePlaylistImageValue).find(Boolean) || ''
 }
 
-export function resolvePlaylistCover(playlist) {
+function resolvePlaylistCover(playlist) {
     if (!playlist || typeof playlist !== 'object') {
         return ''
     }
@@ -56,21 +56,4 @@ export function resolvePlaylistImage(playlist) {
         : null
 
     return resolveTrackImage(firstTrackWithImage) || DEFAULT_PLAYLIST_IMAGE
-}
-
-export function extractPlaylistFilePaths(playlist) {
-    if (!playlist || !Array.isArray(playlist.tracks)) {
-        return []
-    }
-
-    return playlist.tracks.map((track) => track?.filePath).filter(Boolean)
-}
-
-export const playlistMediaUtils = {
-    DEFAULT_PLAYLIST_IMAGE,
-    normalizePlaylistImageValue,
-    resolveTrackImage,
-    resolvePlaylistCover,
-    resolvePlaylistImage,
-    extractPlaylistFilePaths,
 }

@@ -2,23 +2,19 @@ import { Howl, Howler } from 'howler'
 import jsmediatags from 'jsmediatags/dist/jsmediatags.min.js'
 import { playerState as state } from '../utils/player-state.js'
 import { sessionService } from './session-service.js'
-import {
-    // toFileUrl,
-    getBaseName,
-} from '../utils/file-path.js'
+import { getBaseName } from '../utils/file-path.js'
 import { readFile, writeFile, mkdir, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { appDataDir, join } from '@tauri-apps/api/path'
 
 export const audioService = (() => {
     const DEFAULT_VOLUME = 0.5
-    const METADATA_DEBUG_ENABLED = true
-    const VOLUME_DEBUG_ENABLED = true
     const UNKNOWN_TITLE_LABEL = 'Unknown Title'
     const UNKNOWN_ARTIST_LABEL = 'Unknown Artist'
     const UNKNOWN_ALBUM_LABEL = 'Unknown Album'
     const METADATA_CACHE_LIMIT = 240
     const SUPPORTED_AUDIO_EXTENSIONS = ['.mp3', '.wav']
     const ARTWORK_DIR_NAME = 'artwork'
+    const ARTWORK_WEBP_QUALITY = 0.85
     const metadataCache = new Map()
     const artworkCache = new Map()
     const metadataInFlight = new Map()
@@ -27,7 +23,6 @@ export const audioService = (() => {
     let currentSound = null
     let playbackPersistTimer = null
     let progressUpdateTimer = null
-    let lastLoggedVolume = null
 
     function normalizeVolume(value) {
         const parsed = Number(value)
@@ -35,29 +30,7 @@ export const audioService = (() => {
         return Math.max(0, Math.min(1, parsed))
     }
 
-    function logMetadataDebug(filePath, phase, payload = {}) {
-        if (!METADATA_DEBUG_ENABLED) return
-        void filePath
-        void phase
-        void payload
-        // console.log('[metadata-debug]', {
-        //     phase,
-        //     filePath,
-        //     // fileName,
-        //     ...payload,
-        // })
-    }
-
-    function logVolumeDebug(...args) {
-        if (!VOLUME_DEBUG_ENABLED) return
-        try {
-            console.log('[audio-debug]', ...args)
-        } catch {
-            // ignore
-        }
-    }
-
-    function buildFallbackTrackData(filePath) {
+    function fallbackTrack(filePath) {
         return {
             title: getBaseName(filePath),
             artist: UNKNOWN_ARTIST_LABEL,
@@ -66,17 +39,39 @@ export const audioService = (() => {
         }
     }
 
-    function buildResolvedMetadataFromTags(rawTags, fallbackTitle) {
+    function mergeTrackData(filePath, nextTrack = {}) {
+        const previousTrack = state.getState().currentTrack
+        const previous =
+            previousTrack?.filePath === filePath
+                ? previousTrack
+                : { filePath, ...fallbackTrack(filePath) }
+        const fallback = fallbackTrack(filePath)
+
+        return {
+            filePath,
+            title:
+                nextTrack.title && nextTrack.title !== fallback.title
+                    ? nextTrack.title
+                    : previous.title || fallback.title,
+            artist:
+                nextTrack.artist && nextTrack.artist !== fallback.artist
+                    ? nextTrack.artist
+                    : previous.artist || fallback.artist,
+            album:
+                nextTrack.album && nextTrack.album !== fallback.album
+                    ? nextTrack.album
+                    : previous.album || fallback.album,
+            image: nextTrack.image || previous.image || fallback.image,
+        }
+    }
+
+    function tagsToTrack(rawTags, fallbackTitle) {
         return {
             title: rawTags?.title || fallbackTitle || UNKNOWN_TITLE_LABEL,
             artist: rawTags?.artist || UNKNOWN_ARTIST_LABEL,
             album: rawTags?.album || UNKNOWN_ALBUM_LABEL,
             image: rawTags?.image || null,
         }
-    }
-
-    function getMetadataErrorMessage(error) {
-        return error?.info || error?.type || String(error || 'unknown error')
     }
 
     function isSupportedAudioFile(filePath) {
@@ -92,8 +87,8 @@ export const audioService = (() => {
         if (typeof url === 'string' && url.startsWith('blob:')) {
             try {
                 URL.revokeObjectURL(url)
-            } catch {
-                // Ignore — URL may have already been revoked
+            } catch (error) {
+                console.error('Failed to revoke artwork URL:', error)
             }
         }
     }
@@ -142,10 +137,7 @@ export const audioService = (() => {
         const encoder = new TextEncoder()
 
         if (globalThis.crypto?.subtle?.digest) {
-            const digest = await globalThis.crypto.subtle.digest(
-                'SHA-1',
-                encoder.encode(value),
-            )
+            const digest = await globalThis.crypto.subtle.digest('SHA-1', encoder.encode(value))
             return Array.from(new Uint8Array(digest))
                 .map((byte) => byte.toString(16).padStart(2, '0'))
                 .join('')
@@ -165,6 +157,28 @@ export const audioService = (() => {
         if (normalized.includes('jpeg') || normalized.includes('jpg')) return '.jpg'
 
         return '.img'
+    }
+
+    async function encodeArtworkAsWebp(picture) {
+        const bytes =
+            picture?.data instanceof Uint8Array ? picture.data : new Uint8Array(picture?.data || [])
+        const source = new Blob([bytes], { type: picture?.format || 'image/jpeg' })
+        const bitmap = await createImageBitmap(source)
+        const canvas = document.createElement('canvas')
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+        canvas.getContext('2d').drawImage(bitmap, 0, 0)
+        bitmap.close?.()
+
+        const webp = await new Promise((resolve) =>
+            canvas.toBlob(resolve, 'image/webp', ARTWORK_WEBP_QUALITY),
+        )
+
+        if (!webp) {
+            return null
+        }
+
+        return new Uint8Array(await webp.arrayBuffer())
     }
 
     async function ensureArtworkDirectory() {
@@ -194,11 +208,11 @@ export const audioService = (() => {
 
         try {
             await ensureArtworkDirectory()
-            const fileName = `${await hashTrackPath(filePath)}${getArtworkExtension(
-                picture?.format,
-            )}`
+            const webpBytes = await encodeArtworkAsWebp(picture)
+            const extension = webpBytes ? '.webp' : getArtworkExtension(picture?.format)
+            const fileName = `${await hashTrackPath(filePath)}${extension}`
             const relativePath = `${ARTWORK_DIR_NAME}/${fileName}`
-            const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
+            const bytes = webpBytes || (data instanceof Uint8Array ? data : new Uint8Array(data))
             await writeFile(relativePath, bytes, { baseDir: BaseDirectory.AppData })
 
             const baseDir = await appDataDir()
@@ -210,9 +224,13 @@ export const audioService = (() => {
     }
 
     async function readMetadata(filePath, fallbackTitle, { includeImage = false } = {}) {
+        if (getAudioType(filePath).format !== 'mp3') {
+            return tagsToTrack(null, fallbackTitle)
+        }
+
         try {
             const bytes = await readFile(filePath)
-            const blob = new Blob([bytes]) // keep the Blob
+            const blob = new Blob([bytes])
 
             const rawTags = await new Promise((resolve, reject) => {
                 jsmediatags.read(blob, {
@@ -226,20 +244,17 @@ export const audioService = (() => {
                 image = await persistArtwork(filePath, rawTags.picture)
             }
 
-            return buildResolvedMetadataFromTags(
+            return tagsToTrack(
                 { title: rawTags?.title, artist: rawTags?.artist, album: rawTags?.album, image },
                 fallbackTitle,
             )
         } catch (error) {
-            logMetadataDebug(filePath, 'metadata-read-error', {
-                fallbackTitle,
-                error: getMetadataErrorMessage(error),
-            })
+            console.log('Failed to read metadata:', filePath, error)
             return null
         }
     }
 
-    function stopPlaybackPersistTracking() {
+    function stopPlaybackTimers() {
         if (playbackPersistTimer) {
             window.clearInterval(playbackPersistTimer)
             playbackPersistTimer = null
@@ -252,40 +267,27 @@ export const audioService = (() => {
 
     function savePlaybackSnapshot(positionOverride) {
         if (!state || !sessionService?.savePlaylist) return
-        const { playlist, currentTrackIndex } = state.getState()
+        const { playlist, currentTrackIndex, currentTrack } = state.getState()
         if (!Array.isArray(playlist) || playlist.length === 0 || currentTrackIndex < 0) return
 
         const position = Number.isFinite(Number(positionOverride))
             ? Number(positionOverride)
             : Number(currentSound?.seek?.() || 0)
 
-        const currentTrackPath = playlist[currentTrackIndex]
-        let currentTrackOccurrence = 0
-        if (currentTrackPath && Array.isArray(playlist)) {
-            currentTrackOccurrence = playlist
-                .slice(0, currentTrackIndex + 1)
-                .reduce((count, filePath) => (filePath === currentTrackPath ? count + 1 : count), 0)
-        }
-
-        if (typeof sessionService.savePlaybackPosition === 'function') {
-            sessionService.savePlaybackPosition(
-                currentTrackIndex,
-                Math.max(0, position),
-                currentTrackPath,
-                currentTrackOccurrence,
-            )
-            return
-        }
-
-        sessionService.savePlaylist(playlist, currentTrackIndex, Math.max(0, position))
+        sessionService.savePlaylist(
+            playlist,
+            currentTrackIndex,
+            Math.max(0, position),
+            currentTrack,
+        )
     }
 
-    function startPlaybackPersistTracking() {
-        stopPlaybackPersistTracking()
+    function startPlaybackTimers() {
+        stopPlaybackTimers()
         playbackPersistTimer = window.setInterval(() => {
             savePlaybackSnapshot()
         }, 1000)
-        // update UI progress regularly while playing
+
         progressUpdateTimer = window.setInterval(() => {
             try {
                 if (!currentSound || typeof currentSound.seek !== 'function') return
@@ -293,15 +295,15 @@ export const audioService = (() => {
                 const duration = Number(currentSound.duration() || 0)
                 const percent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0
                 state.setProgress({ currentTime, duration, percent })
-            } catch {
-                // ignore occasional seek errors
+            } catch (error) {
+                console.error('Failed to update playback progress:', error)
             }
         }, 500)
     }
 
     async function resolveTrackMetadata(filePath, options = {}) {
         if (!filePath) {
-            return buildFallbackTrackData(filePath)
+            return fallbackTrack(filePath)
         }
 
         const includeImage = options.includeImage === true
@@ -311,7 +313,7 @@ export const audioService = (() => {
 
         if (includeImage && artworkCache.has(filePath)) {
             return {
-                ...(metadataCache.get(filePath) || buildFallbackTrackData(filePath)),
+                ...(metadataCache.get(filePath) || fallbackTrack(filePath)),
                 image: artworkCache.get(filePath) || null,
             }
         }
@@ -321,7 +323,7 @@ export const audioService = (() => {
             return metadataInFlight.get(cacheKey)
         }
 
-        const fallback = buildFallbackTrackData(filePath)
+        const fallback = fallbackTrack(filePath)
         const metadataPromise = readMetadata(filePath, fallback.title, { includeImage })
             .then((metadata) => {
                 const safeMetadata = {
@@ -337,9 +339,8 @@ export const audioService = (() => {
                 metadataInFlight.delete(cacheKey)
                 return safeMetadata
             })
-            .catch((error) => {
+            .catch(() => {
                 metadataInFlight.delete(cacheKey)
-                logMetadataDebug(filePath, 'metadata-cache-error', { error: String(error) })
                 return fallback
             })
 
@@ -349,10 +350,10 @@ export const audioService = (() => {
 
     function getTrackDisplayData(filePath) {
         if (!filePath) {
-            return buildFallbackTrackData(filePath)
+            return fallbackTrack(filePath)
         }
 
-        return metadataCache.get(filePath) || buildFallbackTrackData(filePath)
+        return metadataCache.get(filePath) || fallbackTrack(filePath)
     }
 
     async function prewarmMetadataForNextTrack(currentIndex, playlist) {
@@ -365,12 +366,15 @@ export const audioService = (() => {
             return
         }
 
-        resolveTrackMetadata(nextFilePath, { includeImage: false }).catch(() => {
-            // Ignore prewarm failures; playback should not be blocked by metadata.
-        })
+        resolveTrackMetadata(nextFilePath, { includeImage: false }).catch(() => {})
     }
 
-    async function restoreSavedPlaylist({ playlist, currentTrackIndex, playbackPosition } = {}) {
+    async function restoreSavedPlaylist({
+        playlist,
+        currentTrackIndex,
+        playbackPosition,
+        currentTrack,
+    } = {}) {
         if (!Array.isArray(playlist) || playlist.length === 0) {
             return
         }
@@ -386,8 +390,12 @@ export const audioService = (() => {
         }
 
         const filePath = normalizedPlaylist[index]
+        const savedTrack =
+            currentTrack?.filePath === filePath
+                ? { filePath, ...fallbackTrack(filePath), ...currentTrack }
+                : null
         state.setPlaylist(normalizedPlaylist)
-        state.setCurrentTrack({ filePath, ...buildFallbackTrackData(filePath) })
+        state.setCurrentTrack(savedTrack || { filePath, ...fallbackTrack(filePath) })
         state.setCurrentTrackIndex(index)
 
         if (Number.isFinite(Number(playbackPosition)) && playbackPosition >= 0) {
@@ -403,10 +411,10 @@ export const audioService = (() => {
                 latestIndex === index
 
             if (isSameTrack) {
-                state.setCurrentTrack(trackData)
+                state.setCurrentTrack(mergeTrackData(filePath, trackData))
             }
-        } catch {
-            // Metadata enrichment failure should not impact restore.
+        } catch (error) {
+            console.error('Failed to restore track metadata:', error)
         }
     }
 
@@ -423,19 +431,19 @@ export const audioService = (() => {
         }
     }
 
-    function clearCurrentMusic() {
+    function clearTrack() {
         if (!currentSound) return
         currentSound.stop()
         currentSound.unload()
         currentSound = null
-        stopPlaybackPersistTracking()
+        stopPlaybackTimers()
         if (state) {
             state.setIsPlaying(false)
             state.setProgress({ currentTime: 0, duration: 0, percent: 0 })
         }
     }
 
-    function playNextInQueue({ reason = 'next' } = {}) {
+    function playNext({ reason = 'next' } = {}) {
         if (!state) return
         const { currentTrackIndex, playlist, loopEnabled } = state.getState()
 
@@ -457,7 +465,7 @@ export const audioService = (() => {
                 currentSound.unload()
                 currentSound = null
             }
-            stopPlaybackPersistTracking()
+            stopPlaybackTimers()
             state.setIsPlaying(false)
             state.setProgress({ currentTime: 0, duration: 0, percent: 0 })
             return
@@ -465,13 +473,17 @@ export const audioService = (() => {
         playTrackAtIndex(nextIndex)
     }
 
-    function getMimeType(path) {
-        const lower = path.toLowerCase()
+    const AUDIO_TYPE_MAP = {
+        '.mp3': { mime: 'audio/mpeg', format: 'mp3' },
+        '.wav': { mime: 'audio/wav', format: 'wav' },
+    }
 
-        if (lower.endsWith('.mp3')) return 'audio/mpeg'
-        if (lower.endsWith('.wav')) return 'audio/wav'
-
-        return 'application/octet-stream'
+    function getAudioType(filePath) {
+        const lower = String(filePath || '').toLowerCase()
+        for (const [ext, info] of Object.entries(AUDIO_TYPE_MAP)) {
+            if (lower.endsWith(ext)) return info
+        }
+        return { mime: 'application/octet-stream', format: null }
     }
 
     async function playTrackAtIndex(index, options = {}) {
@@ -483,30 +495,30 @@ export const audioService = (() => {
         const startAtSeconds = Math.max(0, Number(options.startAtSeconds) || 0)
 
         const filePath = playlist[index]
-        const fallbackTrackData = metadataCache.get(filePath) || buildFallbackTrackData(filePath)
+        const track = metadataCache.get(filePath) || fallbackTrack(filePath)
 
         const bytes = await readFile(filePath)
 
         const blob = new Blob([bytes], {
-            type: getMimeType(filePath),
+            type: getAudioType(filePath),
         })
 
         const objectUrl = URL.createObjectURL(blob)
 
         state.setCurrentTrackIndex(index)
-        state.setCurrentTrack(fallbackTrackData)
+        state.setCurrentTrack(mergeTrackData(filePath, track))
 
         // Save current track index and playlist
-        sessionService?.savePlaylist(playlist, index, startAtSeconds)
+        sessionService?.savePlaylist(playlist, index, startAtSeconds, { filePath, ...track })
 
         // Add to recent tracks
         if (addToRecentTracks && sessionService?.prependRecentTrack) {
             const recentTrack = {
                 filePath,
-                title: fallbackTrackData.title,
-                artist: fallbackTrackData.artist,
-                album: fallbackTrackData.album,
-                image: fallbackTrackData.image,
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                image: track.image,
                 playedAt: new Date().toISOString(),
             }
             sessionService.prependRecentTrack(recentTrack).catch((error) => {
@@ -516,7 +528,7 @@ export const audioService = (() => {
 
         if (currentSound) {
             savePlaybackSnapshot()
-            stopPlaybackPersistTracking()
+            stopPlaybackTimers()
             try {
                 currentSound.stop()
                 if (typeof currentSound.unload === 'function') {
@@ -532,6 +544,7 @@ export const audioService = (() => {
 
         currentSound = new Howl({
             src: [objectUrl],
+            format: [getAudioType(filePath).format],
             html5: true,
             volume,
             onload: () => {
@@ -545,14 +558,14 @@ export const audioService = (() => {
             },
             onplay: () => {
                 state.setIsPlaying(true)
-                startPlaybackPersistTracking()
+                startPlaybackTimers()
             },
             onpause: () => {
                 state.setIsPlaying(false)
                 savePlaybackSnapshot()
-                stopPlaybackPersistTracking()
+                stopPlaybackTimers()
             },
-            onend: () => playNextInQueue({ reason: 'ended' }),
+            onend: () => playNext({ reason: 'ended' }),
             onseek: () => {
                 savePlaybackSnapshot()
             },
@@ -576,7 +589,7 @@ export const audioService = (() => {
                     latestPlaylist[currentTrackIndex] === expectedFilePath
 
                 if (isSameTrack) {
-                    state.setCurrentTrack(trackData)
+                    state.setCurrentTrack(mergeTrackData(expectedFilePath, trackData))
                 }
 
                 if (addToRecentTracks && sessionService?.prependRecentTrack && isSameTrack) {
@@ -590,8 +603,8 @@ export const audioService = (() => {
                     })
                 }
             })
-            .catch(() => {
-                // Metadata enrichment failure should not impact playback.
+            .catch((error) => {
+                console.error('Failed to resolve track metadata:', error)
             })
 
         prewarmMetadataForNextTrack(index, playlist)
@@ -629,7 +642,10 @@ export const audioService = (() => {
         state.setPlaylist(audioFilePaths)
 
         // Save playlist for next session
-        sessionService?.savePlaylist(audioFilePaths, 0)
+        sessionService?.savePlaylist(audioFilePaths, 0, 0, {
+            filePath: audioFilePaths[0],
+            ...fallbackTrack(audioFilePaths[0]),
+        })
 
         playTrackAtIndex(0)
     }
@@ -660,6 +676,25 @@ export const audioService = (() => {
         sessionService?.saveVolume(normalizedVolume)
     }
 
+    function seekTo(seconds) {
+        const nextTime = Math.max(0, Number(seconds) || 0)
+        const duration = Number(
+            currentSound?.duration?.() || state.getState().progress.duration || 0,
+        )
+        const percent = duration > 0 ? Math.min(100, (nextTime / duration) * 100) : 0
+
+        try {
+            if (currentSound && typeof currentSound.seek === 'function') {
+                currentSound.seek(nextTime)
+            }
+        } catch (error) {
+            console.error('Seek failed:', error)
+        }
+
+        state.setProgress({ currentTime: nextTime, duration, percent })
+        savePlaybackSnapshot(nextTime)
+    }
+
     async function initializeVolumeFromStore() {
         if (!sessionService?.loadSavedVolume) {
             setVolume(DEFAULT_VOLUME)
@@ -678,32 +713,9 @@ export const audioService = (() => {
     initializeVolumeFromStore()
     restoreSavedPlaylistFromStore()
 
-    // subscribe to playerState changes and log volume updates for debugging
-    try {
-        lastLoggedVolume = state.getState().volume
-        state.subscribe((snapshot) => {
-            try {
-                if (
-                    snapshot &&
-                    typeof snapshot.volume === 'number' &&
-                    snapshot.volume !== lastLoggedVolume
-                ) {
-                    logVolumeDebug('playerState.volume.changed', {
-                        current: snapshot.volume,
-                    })
-                    lastLoggedVolume = snapshot.volume
-                }
-            } catch {
-                // ignore
-            }
-        })
-    } catch {
-        // ignore subscription errors
-    }
-
     window.addEventListener('beforeunload', () => {
         savePlaybackSnapshot()
-        stopPlaybackPersistTracking()
+        stopPlaybackTimers()
         if (currentSound) {
             currentSound.unload()
             currentSound = null
@@ -719,40 +731,15 @@ export const audioService = (() => {
         startPlaylist,
         startSingleTrack,
         togglePlayPause,
-        playNext: (options = {}) => playNextInQueue(options),
-        playPrevious: () => {
-            playPrevious()
-        },
+        playNext,
+        playPrevious,
+        seekTo,
         setVolume,
         getCurrentSound,
-        clearCurrentMusic,
+        clearCurrentMusic: clearTrack,
         getTrackDisplayData,
         resolveTrackMetadata,
         restoreSavedPlaylist,
         restoreSavedPlaylistFromStore,
-        debugVolume: () => {
-            try {
-                return {
-                    stateVolume: state.getState().volume,
-                    howlerVolume:
-                        Howler && typeof Howler.volume === 'function' ? Howler.volume() : null,
-                    currentSoundVolume:
-                        currentSound && typeof currentSound.volume === 'function'
-                            ? currentSound.volume()
-                            : null,
-                }
-            } catch {
-                return null
-            }
-        },
     }
 })()
-
-// Expose for easy debugging in DevTools
-try {
-    if (typeof window !== 'undefined' && window) {
-        window.audioService = audioService
-    }
-} catch {
-    // ignore
-}

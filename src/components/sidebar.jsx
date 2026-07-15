@@ -1,3 +1,4 @@
+import { House, ListVideo, ScrollText, LibraryIcon } from 'lucide-react'
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
@@ -5,16 +6,22 @@ const navItems = [
     {
         label: 'Home',
         path: '/',
-        // icon: <PiPawPrintFill className="w-5 h-5" />
+        icon: <House className="w-5 h-5" />,
     },
     {
-        label: 'About',
-        path: '/about',
-        //   icon: <FaRegQuestionCircle className="w-5 h-5" />,
+        label: 'Library',
+        path: '/library',
+        icon: <LibraryIcon className="w-5 h-5" />,
     },
     {
         label: 'Queue',
         path: '/queue',
+        icon: <ListVideo className="w-5 h-5" />,
+    },
+    {
+        label: 'About',
+        path: '/about',
+        icon: <ScrollText className="w-5 h-5" />,
     },
 ]
 
@@ -26,8 +33,9 @@ const Sidebar = () => {
                     <Link
                         key={item.path}
                         to={item.path}
-                        className="underline text-(--accent-color) font-semibold hover:text-(--hover-color)"
+                        className="flex items-center gap-0.5 underline text-(--accent-color) font-semibold hover:text-(--hover-color)"
                     >
+                        {item.icon}
                         {item.label}
                     </Link>
                 ))}

@@ -1,6 +1,6 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 
-export function toFileUrl(filePath) {
+function toFileUrl(filePath) {
     if (!filePath) return null
 
     const normalizedPath = String(filePath).replace(/\\/g, '/')
@@ -28,9 +28,7 @@ function fromFileUrl(fileUrl) {
 
 function toAssetUrl(filePath) {
     try {
-        if (globalThis.window?.__TAURI_INTERNALS__?.convertFileSrc) {
-            return convertFileSrc(filePath)
-        }
+        return convertFileSrc(filePath)
     } catch {
         // Fall back for browser-only Vite previews.
     }
@@ -49,12 +47,11 @@ export function resolveImageSource(value) {
     }
 
     if (
-        /^(data:|blob:|https?:|asset:)/i.test(src) ||
-        src.startsWith('http://asset.localhost') ||
-        src.startsWith('https://asset.localhost') ||
-        src.startsWith('/assets/') ||
-        src.startsWith('./assets/') ||
-        src.startsWith('../assets/')
+        /^(data:|blob:|https?:|asset:)/i.test(src)
+        // ||
+        // src.startsWith('/assets/') ||
+        // src.startsWith('./assets/') ||
+        // src.startsWith('../assets/')
     ) {
         return src
     }
@@ -75,10 +72,4 @@ export function getBaseName(filePath, fallback = 'Unknown Title') {
 
     const segments = String(filePath).split(/\\|\//)
     return segments[segments.length - 1] || fallback
-}
-
-export const filePathUtils = {
-    toFileUrl,
-    resolveImageSource,
-    getBaseName,
 }

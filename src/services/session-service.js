@@ -15,6 +15,7 @@ export const sessionService = (() => {
         recentPlaylist: [],
         recentPlaylistIndex: -1,
         recentPlaybackPosition: 0,
+        recentTrack: null,
         recentTracks: [],
         approvedAudioPaths: [],
     }
@@ -196,10 +197,6 @@ export const sessionService = (() => {
         return Math.max(0, Math.min(1, parsed))
     }
 
-    function hasAPI(methodName) {
-        return typeof window.electronAPI?.[methodName] === 'function'
-    }
-
     async function loadSavedVolume() {
         try {
             const value = await getSettingsValue('playerVolume', DEFAULT_VOLUME)
@@ -226,6 +223,7 @@ export const sessionService = (() => {
             const playlist = await getSettingsValue('recentPlaylist', [])
             const currentTrackIndex = Number(await getSettingsValue('recentPlaylistIndex', -1))
             const playbackPosition = Number(await getSettingsValue('recentPlaybackPosition', 0))
+            const savedTrack = normalizeTrackRecord(await getSettingsValue('recentTrack', null))
 
             // Sanitize playlist entries: stored blob URLs are session-scoped and invalid
             // after restart — only return persisted real file paths.
@@ -242,14 +240,20 @@ export const sessionService = (() => {
                     Number.isFinite(playbackPosition) && playbackPosition >= 0
                         ? playbackPosition
                         : 0,
+                currentTrack: savedTrack,
             }
         } catch (error) {
             console.error('Failed to load playlist from settings store:', error)
-            return { playlist: [], currentTrackIndex: -1, playbackPosition: 0 }
+            return { playlist: [], currentTrackIndex: -1, playbackPosition: 0, currentTrack: null }
         }
     }
 
-    async function savePlaylist(playlist, currentTrackIndex, playbackPosition = 0) {
+    async function savePlaylist(
+        playlist,
+        currentTrackIndex,
+        playbackPosition = 0,
+        currentTrack = null,
+    ) {
         // Prevent saving transient blob: URLs (object URLs) into persistent storage.
         const safePlaylist = Array.isArray(playlist)
             ? playlist.filter(
@@ -260,6 +264,16 @@ export const sessionService = (() => {
         const parsedPosition = Number(playbackPosition)
         const safePlaybackPosition =
             Number.isFinite(parsedPosition) && parsedPosition >= 0 ? parsedPosition : 0
+        const currentFilePath =
+            safeIndex >= 0 && safeIndex < safePlaylist.length
+                ? safePlaylist[safeIndex]
+                : currentTrack?.filePath
+        const safeTrack = currentFilePath
+            ? normalizeTrackRecord({
+                  ...(currentTrack && typeof currentTrack === 'object' ? currentTrack : {}),
+                  filePath: currentFilePath,
+              })
+            : null
 
         try {
             const savedPlaylist = await setSettingsValue('recentPlaylist', safePlaylist)
@@ -268,36 +282,10 @@ export const sessionService = (() => {
                 'recentPlaybackPosition',
                 safePlaybackPosition,
             )
-            return savedPlaylist && savedIndex && savedPosition
+            const savedTrack = await setSettingsValue('recentTrack', safeTrack)
+            return savedPlaylist && savedIndex && savedPosition && savedTrack
         } catch (error) {
             console.error('Failed to persist playlist:', error)
-            return false
-        }
-    }
-
-    async function savePlaybackPosition(
-        currentTrackIndex,
-        playbackPosition = 0,
-        currentTrackPath,
-        currentTrackOccurrence,
-    ) {
-        if (!hasAPI('savePlaybackPosition')) {
-            return false
-        }
-
-        try {
-            return Boolean(
-                await window.electronAPI.savePlaybackPosition(
-                    Number.isInteger(currentTrackIndex) ? currentTrackIndex : -1,
-                    Math.max(0, Number(playbackPosition) || 0),
-                    typeof currentTrackPath === 'string' && currentTrackPath
-                        ? currentTrackPath
-                        : undefined,
-                    Number.isInteger(currentTrackOccurrence) ? currentTrackOccurrence : undefined,
-                ),
-            )
-        } catch (error) {
-            console.error('Failed to persist playback position:', error)
             return false
         }
     }
@@ -646,7 +634,6 @@ export const sessionService = (() => {
         saveVolume,
         loadPlaylist,
         savePlaylist,
-        savePlaybackPosition,
         loadRecentTracks,
         saveRecentTracks,
         prependRecentTrack,

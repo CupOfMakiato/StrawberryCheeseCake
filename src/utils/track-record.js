@@ -68,11 +68,3 @@ export function normalizeTrackRecord(track) {
 
     return normalizedTrack
 }
-
-export const trackRecordUtils = {
-    DEFAULT_TRACK_TITLE,
-    DEFAULT_TRACK_ARTIST,
-    DEFAULT_TRACK_ALBUM,
-    DEFAULT_TRACK_IMAGE,
-    normalizeTrackRecord,
-}

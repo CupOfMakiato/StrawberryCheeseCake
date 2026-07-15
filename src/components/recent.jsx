@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import musicPlaceholder from '../assets/music-placeholder.png'
-import { audioService } from '../services/audio-service'
+import musicPlaceholder from '../assets/IMG_6103.webp'
 import { sessionService } from '../services/session-service'
-import { extractPlaylistFilePaths, resolvePlaylistImage } from '../utils/playlist-media'
+import { resolvePlaylistImage } from '../utils/playlist-media'
 import { resolveTrackArtwork } from '../utils/artwork'
 import { resolveImageSource } from '../utils/file-path'
 
@@ -103,19 +102,6 @@ const Recent = () => {
     const showTracks = activeTab === TAB_KEYS.TRACKS
     const showPlaylists = activeTab === TAB_KEYS.PLAYLISTS
 
-    function handlePlayTrack(track) {
-        if (track?.filePath) {
-            audioService.startSingleTrack(track.filePath)
-        }
-    }
-
-    function handlePlayPlaylist(playlist) {
-        const paths = extractPlaylistFilePaths(playlist)
-        if (paths.length > 0) {
-            audioService.startPlaylist(paths)
-        }
-    }
-
     function renderTabButton(key, label) {
         const isActive = activeTab === key
         return (
@@ -124,7 +110,7 @@ const Recent = () => {
                 type="button"
                 className={`rounded-full border px-3 py-1 text-sm font-semibold transition-colors ${
                     isActive
-                        ? 'border-slate-900 bg-slate-900 text-white'
+                        ? 'border-[#962e4a] bg-[#d5194b] text-white hover:bg-[#ac1c42]'
                         : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
                 }`}
                 onClick={() => setActiveTab(key)}
@@ -141,18 +127,18 @@ const Recent = () => {
         return (
             <li
                 key={`${track.filePath}-${index}`}
-                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-1 py-1 shadow-sm"
+                className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2.5 shadow-sm"
             >
                 <img
                     src={artworkSrc}
                     alt={track.title || 'Track cover'}
-                    className="h-12 w-12 rounded-lg object-cover"
+                    className="h-10 w-10 rounded-lg object-cover"
                 />
                 <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-slate-900">
+                    <div className="truncate text-sm font-semibold text-slate-900">
                         {track.title || 'Unknown title'}
                     </div>
-                    <div className="truncate text-sm text-slate-500">
+                    <div className="truncate text-xs text-slate-500">
                         {track.artist || 'Unknown artist'}
                     </div>
                 </div>
@@ -166,18 +152,18 @@ const Recent = () => {
         return (
             <li
                 key={`${playlist.id || playlist.folderPath || index}`}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-2 shadow-sm"
+                className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2.5 shadow-sm"
             >
                 <img
                     src={artworkSrc}
                     alt={playlist.name || 'Playlist cover'}
-                    className="h-12 w-12 rounded-lg object-cover"
+                    className="h-10 w-10 rounded-lg object-cover"
                 />
                 <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-slate-900">
+                    <div className="truncate text-sm font-medium text-slate-900">
                         {playlist.name || 'Untitled playlist'}
                     </div>
-                    <div className="text-sm text-slate-500">
+                    <div className="text-xs text-slate-500">
                         {Array.isArray(playlist.tracks) ? playlist.tracks.length : 0} tracks
                     </div>
                 </div>
@@ -207,7 +193,7 @@ const Recent = () => {
         return (
             <div className="space-y-4">
                 <div className="space-y-2">
-                    <p className="text-md font-bold">Recent Playlists</p>
+                    <p className="text-sm font-semibold text-slate-900">Recent Playlists</p>
                     {playlistCount === 0 ? (
                         <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
                             No recent playlists yet.
@@ -218,13 +204,13 @@ const Recent = () => {
                 </div>
 
                 <div className="space-y-2">
-                    <p className="text-md font-bold">Recent Music</p>
+                    <p className="text-sm font-semibold text-slate-900">Recent Music</p>
                     {trackCount === 0 ? (
                         <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
                             No recent music yet.
                         </div>
                     ) : (
-                        <ul className="space-y-3 gap-1.5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                        <ul className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
                             {limitedTracks.map(renderTrackRow)}
                         </ul>
                     )}
@@ -233,15 +219,11 @@ const Recent = () => {
         )
     }
 
-    function s(value) {
-        return value === 1 ? '' : 's'
-    }
-
     return (
-        <section className="recent-music space-y-4 border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="recent-music space-y-4 border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-2">
                 <div>
-                    <p className="text-md font-bold">Recently Played</p>
+                    <p className="text-sm font-semibold text-slate-900">Recently Played</p>
                 </div>
 
                 <div className="flex items-center gap-2 p-1">

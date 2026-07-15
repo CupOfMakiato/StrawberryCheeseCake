@@ -29,6 +29,15 @@
                 }
             ]
         },
+        {
+            "identifier": "fs:allow-read-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/artwork/**"
+                },
+                { "path": "**" }
+            ]
+        },
         "fs:allow-read",
         "fs:allow-app-meta",
         "fs:write-files",

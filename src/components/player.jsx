@@ -9,26 +9,99 @@ import {
     Volume2,
 } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
-import musicPlaceholder from '../assets/music-placeholder.png'
+import musicPlaceholder from '../assets/IMG_6103.webp'
 import { playerState } from '../utils/player-state'
 import { audioService } from '../services/audio-service'
+import { trackMetadataService } from '../services/track-metadata-service'
 import { formatDurationClock } from '../utils/duration'
 import { resolveImageSource } from '../utils/file-path'
+import { resolveTrackArtwork } from '../utils/artwork'
 
 const Player = () => {
     const [currentTrack, setCurrentTrack] = useState(playerState.getState().currentTrack)
     const [progress, setProgress] = useState(playerState.getState().progress)
     const [volume, setVolume] = useState(playerState.getState().volume)
+    const [isPlaying, setIsPlaying] = useState(playerState.getState().isPlaying)
+    const [isSeeking, setIsSeeking] = useState(false)
+    const [seekPercent, setSeekPercent] = useState(playerState.getState().progress.percent || 0)
+    const [coverSrc, setCoverSrc] = useState(
+        resolveImageSource(playerState.getState().currentTrack.image) || musicPlaceholder,
+    )
 
     useEffect(() => {
+        let isMounted = true
+
+        async function restoreSavedCurrentTrack() {
+            try {
+                const track = await trackMetadataService.restoreSavedCurrentTrack()
+                if (isMounted && track?.filePath) {
+                    setCurrentTrack(track)
+                }
+            } catch (error) {
+                console.error('Failed to load saved player track:', error)
+            }
+        }
+
         const unsubscribe = playerState.subscribe((state) => {
             setCurrentTrack(state.currentTrack)
             setProgress(state.progress)
             setVolume(state.volume)
+            setIsPlaying(state.isPlaying)
         })
+        restoreSavedCurrentTrack()
 
-        return unsubscribe
+        return () => {
+            isMounted = false
+            unsubscribe()
+        }
     }, [])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const nextCover = resolveImageSource(currentTrack.image) || musicPlaceholder
+        setCoverSrc(nextCover)
+
+        if (!currentTrack?.filePath || currentTrack.image) {
+            return () => {
+                cancelled = true
+            }
+        }
+
+        resolveTrackArtwork(currentTrack)
+            .then((artwork) => {
+                if (!cancelled && artwork) {
+                    setCoverSrc(artwork)
+                }
+            })
+            .catch((error) => {
+                console.error('Failed to resolve player track artwork:', error)
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [currentTrack.filePath, currentTrack.image])
+
+    useEffect(() => {
+        if (!isSeeking) {
+            setSeekPercent(Number.isFinite(progress.percent) ? progress.percent : 0)
+        }
+    }, [isSeeking, progress.percent])
+
+    const sliderPercent = isSeeking
+        ? seekPercent
+        : Number.isFinite(progress.percent)
+          ? progress.percent
+          : 0
+    const sliderCurrentTime = (Number(progress.duration) || 0) * (sliderPercent / 100)
+
+    function commitSeek(nextPercent) {
+        const duration = Number(progress.duration) || 0
+        audioService.seekTo(duration * (nextPercent / 100))
+        setSeekPercent(nextPercent)
+        setIsSeeking(false)
+    }
 
     return (
         <div
@@ -39,7 +112,7 @@ const Player = () => {
                 <div className="flex min-w-0 items-center gap-3">
                     <img
                         id="albumArt"
-                        src={resolveImageSource(currentTrack.image) || musicPlaceholder}
+                        src={coverSrc}
                         className="h-12.5 w-12.5 shrink-0 rounded-lg bg-slate-100 object-cover"
                         alt={
                             currentTrack.title
@@ -80,6 +153,7 @@ const Player = () => {
                             type="button"
                             aria-label="Previous track"
                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-700 hover:bg-slate-100"
+                            onClick={() => audioService.playPrevious()}
                         >
                             <SkipBack />
                         </button>
@@ -88,19 +162,18 @@ const Player = () => {
                             id="playPauseBtn"
                             type="button"
                             aria-label="Play/Pause"
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white hover:bg-slate-800"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[#d5194b] text-white hover:bg-[#ac1c42]"
+                            onClick={() => audioService.togglePlayPause()}
                         >
-                            <Play />
+                            {isPlaying ? <Pause /> : <Play />}
                         </button>
-                        {/* <button className="inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-slate-100">
-                <Pause />
-            </button> */}
 
                         <button
                             id="nextBtn"
                             type="button"
                             aria-label="Next track"
                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white text-slate-700 hover:bg-slate-100"
+                            onClick={() => audioService.playNext()}
                         >
                             <SkipForward />
                         </button>
@@ -120,7 +193,9 @@ const Player = () => {
                             id="currentTime"
                             className="min-w-7.5 text-center text-[11px] text-slate-500"
                         >
-                            {formatDurationClock(progress.currentTime)}
+                            {formatDurationClock(
+                                isSeeking ? sliderCurrentTime : progress.currentTime,
+                            )}
                         </span>
 
                         <input
@@ -128,23 +203,34 @@ const Player = () => {
                             id="progressSlider"
                             min={0}
                             max={100}
-                            value={Number.isFinite(progress.percent) ? progress.percent : 0}
+                            value={sliderPercent}
                             onChange={(e) => {
-                                const pct = Number(e.target.value) || 0
-                                const dur = Number(progress.duration) || 0
-                                const seconds = dur * (pct / 100)
-                                const sound = audioService.getCurrentSound()
-                                try {
-                                    if (sound && typeof sound.seek === 'function') {
-                                        sound.seek(seconds)
-                                    } else {
-                                        playerState.setProgress({
-                                            currentTime: seconds,
-                                            percent: pct,
-                                        })
-                                    }
-                                } catch (err) {
-                                    console.error('Seek failed:', err)
+                                const nextPercent = Number(e.target.value) || 0
+                                setSeekPercent(nextPercent)
+                                if (!isSeeking) {
+                                    commitSeek(nextPercent)
+                                }
+                            }}
+                            onMouseDown={() => setIsSeeking(true)}
+                            onTouchStart={() => setIsSeeking(true)}
+                            onMouseUp={(e) => {
+                                if (isSeeking) {
+                                    commitSeek(Number(e.currentTarget.value) || 0)
+                                }
+                            }}
+                            onTouchEnd={(e) => {
+                                if (isSeeking) {
+                                    commitSeek(Number(e.currentTarget.value) || 0)
+                                }
+                            }}
+                            onBlur={(e) => {
+                                if (isSeeking) {
+                                    commitSeek(Number(e.currentTarget.value) || 0)
+                                }
+                            }}
+                            onKeyUp={(e) => {
+                                if (!isSeeking) {
+                                    commitSeek(Number(e.currentTarget.value) || 0)
                                 }
                             }}
                             className="w-full"
