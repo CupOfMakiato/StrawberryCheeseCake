@@ -1,13 +1,47 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": [
-    "main"
-  ],
-  "permissions": [
-    "core:default",
-    "opener:default",
-    "store:default"
-  ]
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "default",
+    "description": "Capability for the main window",
+    "windows": ["main"],
+    "permissions": [
+        "core:default",
+        "dialog:allow-open",
+        "fs:allow-read-dir",
+        "fs:default",
+        {
+            "identifier": "fs:allow-exists",
+            "allow": [
+                {
+                    "path": "$APPDATA/*"
+                }
+            ]
+        },
+        "fs:allow-mkdir",
+        {
+            "identifier": "fs:allow-mkdir",
+            "allow": ["$APPDATA/**"]
+        },
+        {
+            "identifier": "fs:allow-write-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/artwork/**"
+                }
+            ]
+        },
+        {
+            "identifier": "fs:allow-read-file",
+            "allow": [
+                {
+                    "path": "$APPDATA/artwork/**"
+                },
+                { "path": "**" }
+            ]
+        },
+        "fs:allow-read",
+        "fs:allow-app-meta",
+        "fs:write-files",
+        "opener:default",
+        "store:default"
+    ]
 }

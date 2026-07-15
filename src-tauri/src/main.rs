@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    orange_cheesecake_lib::run()
+    strawberry_cheesecake_lib::run()
 }
