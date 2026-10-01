@@ -1,5 +1,4 @@
 import { Howl, Howler } from 'howler'
-import jsmediatags from 'jsmediatags/dist/jsmediatags.min.js'
 import { playerState as state } from '../utils/player-state.js'
 import { sessionService } from './session-service.js'
 import { getBaseName } from '../utils/file-path.js'
@@ -19,6 +18,7 @@ export const audioService = (() => {
     const artworkCache = new Map()
     const metadataInFlight = new Map()
     let artworkDirPromise = null
+    let mediaTagsPromise = null
 
     let currentSound = null
     let playbackPersistTimer = null
@@ -223,6 +223,16 @@ export const audioService = (() => {
         }
     }
 
+    async function getMediaTags() {
+        if (!mediaTagsPromise) {
+            mediaTagsPromise = import('jsmediatags/dist/jsmediatags.min.js').then(
+                (module) => module.default || module,
+            )
+        }
+
+        return mediaTagsPromise
+    }
+
     async function readMetadata(filePath, fallbackTitle, { includeImage = false } = {}) {
         if (getAudioType(filePath).format !== 'mp3') {
             return tagsToTrack(null, fallbackTitle)
@@ -231,6 +241,7 @@ export const audioService = (() => {
         try {
             const bytes = await readFile(filePath)
             const blob = new Blob([bytes])
+            const jsmediatags = await getMediaTags()
 
             const rawTags = await new Promise((resolve, reject) => {
                 jsmediatags.read(blob, {
@@ -431,32 +442,9 @@ export const audioService = (() => {
         }
     }
 
-    function clearTrack() {
-        if (!currentSound) return
-        currentSound.stop()
-        currentSound.unload()
-        currentSound = null
-        stopPlaybackTimers()
-        if (state) {
-            state.setIsPlaying(false)
-            state.setProgress({ currentTime: 0, duration: 0, percent: 0 })
-        }
-    }
-
-    function playNext({ reason = 'next' } = {}) {
+    function playNext() {
         if (!state) return
-        const { currentTrackIndex, playlist, loopEnabled } = state.getState()
-
-        if (reason === 'ended' && loopEnabled && Number.isInteger(currentTrackIndex)) {
-            if (currentTrackIndex >= 0 && currentTrackIndex < playlist.length) {
-                playTrackAtIndex(currentTrackIndex, {
-                    autoplay: true,
-                    startAtSeconds: 0,
-                    addToRecentTracks: false,
-                })
-                return
-            }
-        }
+        const { currentTrackIndex, playlist } = state.getState()
 
         const nextIndex = currentTrackIndex + 1
         if (nextIndex >= playlist.length) {
@@ -497,7 +485,13 @@ export const audioService = (() => {
         const filePath = playlist[index]
         const track = metadataCache.get(filePath) || fallbackTrack(filePath)
 
-        const bytes = await readFile(filePath)
+        let bytes
+        try {
+            bytes = await readFile(filePath)
+        } catch (error) {
+            console.error('Failed to read audio file:', filePath, error)
+            return false
+        }
 
         const blob = new Blob([bytes], {
             type: getAudioType(filePath),
@@ -565,7 +559,7 @@ export const audioService = (() => {
                 savePlaybackSnapshot()
                 stopPlaybackTimers()
             },
-            onend: () => playNext({ reason: 'ended' }),
+            onend: playNext,
             onseek: () => {
                 savePlaybackSnapshot()
             },
@@ -608,6 +602,7 @@ export const audioService = (() => {
             })
 
         prewarmMetadataForNextTrack(index, playlist)
+        return true
     }
 
     function togglePlayPause() {
@@ -634,10 +629,10 @@ export const audioService = (() => {
     }
 
     function startPlaylist(filePaths) {
-        if (!state) return
-        if (!Array.isArray(filePaths) || filePaths.length === 0) return
+        if (!state) return []
+        if (!Array.isArray(filePaths) || filePaths.length === 0) return []
         const audioFilePaths = filePaths.filter(isSupportedAudioFile)
-        if (audioFilePaths.length === 0) return
+        if (audioFilePaths.length === 0) return []
 
         state.setPlaylist(audioFilePaths)
 
@@ -648,6 +643,7 @@ export const audioService = (() => {
         })
 
         playTrackAtIndex(0)
+        return audioFilePaths
     }
 
     function startSingleTrack(filePath) {
@@ -722,10 +718,6 @@ export const audioService = (() => {
         }
     })
 
-    function getCurrentSound() {
-        return currentSound
-    }
-
     return {
         playTrackAtIndex,
         startPlaylist,
@@ -735,11 +727,7 @@ export const audioService = (() => {
         playPrevious,
         seekTo,
         setVolume,
-        getCurrentSound,
-        clearCurrentMusic: clearTrack,
         getTrackDisplayData,
         resolveTrackMetadata,
-        restoreSavedPlaylist,
-        restoreSavedPlaylistFromStore,
     }
 })()

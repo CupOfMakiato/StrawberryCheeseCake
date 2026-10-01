@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import path from 'path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -27,6 +28,11 @@ export default defineConfig(async () => ({
         watch: {
             // 3. tell Vite to ignore watching `src-tauri`
             ignored: ['**/src-tauri/**'],
+        },
+    },
+    resolve: {
+        alias: {
+            '@': path.resolve(__dirname, './src'),
         },
     },
 }))

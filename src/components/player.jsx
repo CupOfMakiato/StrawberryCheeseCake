@@ -8,7 +8,7 @@ import {
     SkipForward,
     Volume2,
 } from 'lucide-react'
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import musicPlaceholder from '../assets/IMG_6103.webp'
 import { playerState } from '../utils/player-state'
 import { audioService } from '../services/audio-service'
@@ -47,6 +47,7 @@ const Player = () => {
             setProgress(state.progress)
             setVolume(state.volume)
             setIsPlaying(state.isPlaying)
+            console.log('current volume:', state.volume)
         })
         restoreSavedCurrentTrack()
 

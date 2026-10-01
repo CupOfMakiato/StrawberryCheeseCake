@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Ellipsis, Music4Icon, Play } from 'lucide-react'
 import musicPlaceholder from '../assets/IMG_6103.webp'
+import { audioService } from '../services/audio-service'
 import { sessionService } from '../services/session-service'
-import { resolvePlaylistImage } from '../utils/playlist-media'
 import { resolveTrackArtwork } from '../utils/artwork'
 import { resolveImageSource } from '../utils/file-path'
 
@@ -21,8 +22,10 @@ const Recent = () => {
     useEffect(() => {
         let isMounted = true
 
-        async function loadRecentData() {
-            setIsLoading(true)
+        async function loadRecentData({ showLoading = false } = {}) {
+            if (showLoading) {
+                setIsLoading(true)
+            }
             try {
                 const [tracks, playlists] = await Promise.all([
                     typeof sessionService.loadRecentTracks === 'function'
@@ -44,7 +47,7 @@ const Recent = () => {
             } catch (error) {
                 console.error('Failed to load recent data:', error)
             } finally {
-                if (isMounted) {
+                if (isMounted && showLoading) {
                     setIsLoading(false)
                 }
             }
@@ -76,7 +79,7 @@ const Recent = () => {
             )
         }
 
-        loadRecentData()
+        loadRecentData({ showLoading: true })
 
         const refreshRecentTracks = () => {
             if (isMounted) {
@@ -98,7 +101,6 @@ const Recent = () => {
     const playlistCount = recentPlaylists.length
     const limitedTracks = recentTracks.slice(0, 6)
     const limitedPlaylists = recentPlaylists.slice(0, 5)
-    const showAll = activeTab === TAB_KEYS.ALL
     const showTracks = activeTab === TAB_KEYS.TRACKS
     const showPlaylists = activeTab === TAB_KEYS.PLAYLISTS
 
@@ -127,13 +129,23 @@ const Recent = () => {
         return (
             <li
                 key={`${track.filePath}-${index}`}
-                className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2.5 shadow-sm"
+                className="group flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2.5 shadow-sm"
             >
-                <img
-                    src={artworkSrc}
-                    alt={track.title || 'Track cover'}
-                    className="h-10 w-10 rounded-lg object-cover"
-                />
+                <div className="relative h-10 w-10 shrink-0">
+                    <img
+                        src={artworkSrc}
+                        alt={track.title || 'Track cover'}
+                        className="h-10 w-10 rounded-lg object-cover"
+                    />
+                    <button
+                        type="button"
+                        aria-label={`Play ${track.title || 'track'}`}
+                        className="absolute inset-0 flex items-center justify-center rounded-lg bg-slate-950/55 text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                        onClick={() => audioService.startSingleTrack(track.filePath)}
+                    >
+                        <Play size={16} fill="currentColor" aria-hidden="true" />
+                    </button>
+                </div>
                 <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold text-slate-900">
                         {track.title || 'Unknown title'}
@@ -142,23 +154,26 @@ const Recent = () => {
                         {track.artist || 'Unknown artist'}
                     </div>
                 </div>
+                <button
+                    type="button"
+                    aria-label={`Options for ${track.title || 'track'}`}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                >
+                    <Ellipsis size={18} aria-hidden="true" />
+                </button>
             </li>
         )
     }
 
     function renderPlaylistRow(playlist, index) {
-        const artworkSrc = resolveImageSource(resolvePlaylistImage(playlist)) || musicPlaceholder
-
         return (
             <li
                 key={`${playlist.id || playlist.folderPath || index}`}
                 className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2.5 shadow-sm"
             >
-                <img
-                    src={artworkSrc}
-                    alt={playlist.name || 'Playlist cover'}
-                    className="h-10 w-10 rounded-lg object-cover"
-                />
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-[#d5194b]">
+                    <Music4Icon size={22} aria-hidden="true" />
+                </div>
                 <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-slate-900">
                         {playlist.name || 'Untitled playlist'}
@@ -167,6 +182,13 @@ const Recent = () => {
                         {Array.isArray(playlist.tracks) ? playlist.tracks.length : 0} tracks
                     </div>
                 </div>
+                <button
+                    type="button"
+                    aria-label={`Options for ${playlist.name || 'playlist'}`}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                >
+                    <Ellipsis size={18} aria-hidden="true" />
+                </button>
             </li>
         )
     }

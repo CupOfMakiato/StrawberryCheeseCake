@@ -1,4 +1,3 @@
-import React from 'react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import cheesecake from '../assets/IMG_6102.webp'
 

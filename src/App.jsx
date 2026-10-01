@@ -1,4 +1,3 @@
-import { ThemeProvider } from './contexts/ThemeContext'
 import { BrowserRouter } from 'react-router-dom'
 import AppRouter from './routes/AppRouter'
 import Player from './components/player'
@@ -7,15 +6,13 @@ import './App.css'
 
 function App() {
     return (
-        <ThemeProvider>
-            <BrowserRouter>
-                <div className="appShell">
-                    <Sidebar />
-                    <AppRouter />
-                    <Player />
-                </div>
-            </BrowserRouter>
-        </ThemeProvider>
+        <BrowserRouter>
+            <div className="appShell">
+                <Sidebar />
+                <AppRouter />
+                <Player />
+            </div>
+        </BrowserRouter>
     )
 }
 

@@ -2,8 +2,8 @@ import { getBaseName } from './file-path.js'
 
 export const DEFAULT_TRACK_TITLE = 'Unknown Title'
 export const DEFAULT_TRACK_ARTIST = 'Unknown Artist'
-export const DEFAULT_TRACK_ALBUM = 'Unknown Album'
-export const DEFAULT_TRACK_IMAGE = ''
+const DEFAULT_TRACK_ALBUM = 'Unknown Album'
+const DEFAULT_TRACK_IMAGE = ''
 
 function normalizeTrackImage(value) {
     if (typeof value !== 'string') {

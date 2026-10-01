@@ -1,16 +1,17 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readDir, stat } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
 import musicPlaceholder from '../assets/IMG_6103.webp'
 import { audioService } from '../services/audio-service'
+import { sessionService } from '../services/session-service'
 import { trackMetadataService } from '../services/track-metadata-service'
 import { playerState } from '../utils/player-state'
 import Recent from '../components/recent'
-import { resolveImageSource } from '../utils/file-path'
+import { getBaseName, resolveImageSource } from '../utils/file-path'
 import { resolveTrackArtwork } from '../utils/artwork'
 
-const Home = () => {
+const CurrentTrackPreview = () => {
     const [currentTrack, setCurrentTrack] = useState(playerState.getState().currentTrack)
     const [coverSrc, setCoverSrc] = useState(
         resolveImageSource(playerState.getState().currentTrack.image) || musicPlaceholder,
@@ -68,6 +69,25 @@ const Home = () => {
         }
     }, [currentTrack.filePath, currentTrack.image])
 
+    return (
+        <>
+            <img
+                className="coverImage w-72 h-72 rounded-lg object-cover mb-3"
+                src={coverSrc}
+                alt="Album cover"
+                draggable={false}
+            />
+            <h2 id="trackTitle" className="mt-2 mb-2 font-semibold text-[1.25rem]">
+                {currentTrack.title || 'No track selected'}
+            </h2>
+            <p className="trackArtist -mt-1">
+                {currentTrack.artist || 'Select a file to start playing'}
+            </p>
+        </>
+    )
+}
+
+const Home = () => {
     async function selectFile() {
         try {
             const selectedPath = await open({
@@ -111,36 +131,27 @@ const Home = () => {
                     }),
             )
 
-            audioService.startPlaylist(
-                fileEntries.sort((a, b) => a.addedAt - b.addedAt).map((entry) => entry.filePath),
-            )
+            const orderedPaths = fileEntries
+                .sort((a, b) => a.addedAt - b.addedAt)
+                .map((entry) => entry.filePath)
+            const playlistPaths = audioService.startPlaylist(orderedPaths)
+
+            if (playlistPaths.length) {
+                await sessionService.prependRecentFolderPlaylist({
+                    folderPath: selectedFolder,
+                    name: getBaseName(selectedFolder, 'Folder Playlist'),
+                    tracks: playlistPaths,
+                })
+            }
         } catch (error) {
             console.error('Failed to select audio folder:', error)
         }
     }
 
     return (
-        // <div className="loadingOverlay">
-
-        // </div>
-
         <main className="app-scroll space-y-6">
             <Recent />
-
-            <img
-                className="coverImage w-72 h-72 rounded-lg object-cover mb-3"
-                src={coverSrc}
-                alt="Album cover"
-                draggable={false}
-            />
-            {/* <div className="trackInfo"> */}
-            <h2 id="trackTitle" className="mt-2 mb-2 font-semibold text-[1.25rem]">
-                {currentTrack.title || 'No track selected'}
-            </h2>
-            {/* </div> */}
-            <p className="trackArtist -mt-1">
-                {currentTrack.artist || 'Select a file to start playing'}
-            </p>
+            <CurrentTrackPreview />
             <div className="controls gap-2 flex">
                 <button
                     className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-2 border border-gray-400 rounded shadow"
@@ -160,7 +171,6 @@ const Home = () => {
                 </button>
             </div>
         </main>
-        // <div className="bottom-player"></div>
     )
 }
 

@@ -6,6 +6,15 @@
     "permissions": [
         "core:default",
         "dialog:allow-open",
+        "dialog:allow-save",
+        {
+            "identifier": "http:default",
+            "allow": [
+                { "url": "https://www.youtube.com/**" },
+                { "url": "https://youtubei.googleapis.com/**" },
+                { "url": "https://*.googlevideo.com/**" }
+            ]
+        },
         "fs:allow-read-dir",
         "fs:default",
         {

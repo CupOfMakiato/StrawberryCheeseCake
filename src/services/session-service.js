@@ -8,7 +8,6 @@ export const sessionService = (() => {
     const MAX_RECENT_TRACKS = 10
     const MAX_RECENT_FOLDER_PLAYLISTS = 8
     const MAX_RECENT_FOLDER_TRACKS = 300
-    const USER_PLAYLISTS_KEY = 'strawberry-cheesecake:user-playlists'
     const SETTINGS_STORE_PATH = 'settings.json'
     const SETTINGS_STORE_DEFAULTS = {
         playerVolume: DEFAULT_VOLUME,
@@ -17,7 +16,6 @@ export const sessionService = (() => {
         recentPlaybackPosition: 0,
         recentTrack: null,
         recentTracks: [],
-        approvedAudioPaths: [],
     }
 
     let settingsStorePromise = null
@@ -92,17 +90,15 @@ export const sessionService = (() => {
         }
     }
 
+    const USER_PLAYLISTS_KEY = 'strawberry-cheesecake:user-playlists'
     const RECENT_FOLDER_PLAYLISTS_KEY = 'strawberry-cheesecake:recent-folder-playlists'
-    const EMBEDDED_IMAGE_PREFIX = 'data:image/'
 
     function compactStorageValue(key, normalized) {
-        window.setTimeout(() => {
-            try {
-                window.localStorage.setItem(key, JSON.stringify(normalized))
-            } catch (error) {
-                console.error('Failed to compact stored playlist data:', error)
-            }
-        }, 0)
+        try {
+            window.localStorage.setItem(key, JSON.stringify(normalized))
+        } catch (error) {
+            console.error('Failed to compact stored playlist data:', error)
+        }
     }
 
     function normalizeRecentFolderPlaylistTracks(tracks) {
@@ -322,31 +318,6 @@ export const sessionService = (() => {
         }
     }
 
-    async function approveRecentAudioPath(filePath) {
-        if (!filePath || typeof filePath !== 'string') {
-            return false
-        }
-
-        try {
-            const existing = await getSettingsValue('approvedAudioPaths', [])
-            const approved = Array.isArray(existing) ? [...existing] : []
-            const normalizedPath = filePath.trim()
-            if (!normalizedPath) {
-                return false
-            }
-
-            if (!approved.includes(normalizedPath)) {
-                approved.push(normalizedPath)
-                return setSettingsValue('approvedAudioPaths', approved)
-            }
-
-            return true
-        } catch (error) {
-            console.error('Failed to approve recent audio path:', error)
-            return false
-        }
-    }
-
     async function prependRecentTrack(track) {
         if (!track?.filePath) {
             return false
@@ -368,8 +339,22 @@ export const sessionService = (() => {
 
         return playlists
             .map((playlist) => {
-                const tracks = Array.isArray(playlist?.tracks)
-                    ? playlist.tracks.map((track) => normalizeTrackRecord(track)).filter(Boolean)
+                if (!playlist || typeof playlist !== 'object') {
+                    return null
+                }
+
+                const uniqueTrackPaths = new Set()
+                const tracks = Array.isArray(playlist.tracks)
+                    ? playlist.tracks
+                          .map((track) => normalizeTrackRecord(track))
+                          .filter((track) => {
+                              if (!track || uniqueTrackPaths.has(track.filePath)) {
+                                  return false
+                              }
+
+                              uniqueTrackPaths.add(track.filePath)
+                              return true
+                          })
                     : []
                 const cover =
                     resolveStoredPlaylistCover(playlist) ||
@@ -377,27 +362,27 @@ export const sessionService = (() => {
 
                 return {
                     id:
-                        typeof playlist?.id === 'string'
-                            ? playlist.id
+                        typeof playlist.id === 'string' && playlist.id.trim()
+                            ? playlist.id.trim()
                             : `playlist-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
                     name:
-                        typeof playlist?.name === 'string' && playlist.name.trim()
+                        typeof playlist.name === 'string' && playlist.name.trim()
                             ? playlist.name.trim()
                             : 'Untitled Playlist',
-                    banner: normalizePlaylistImageValue(playlist?.banner),
+                    banner: normalizePlaylistImageValue(playlist.banner),
                     cover,
                     tracks,
                     createdAt:
-                        typeof playlist?.createdAt === 'string'
+                        typeof playlist.createdAt === 'string'
                             ? playlist.createdAt
                             : new Date().toISOString(),
                     updatedAt:
-                        typeof playlist?.updatedAt === 'string'
+                        typeof playlist.updatedAt === 'string'
                             ? playlist.updatedAt
                             : new Date().toISOString(),
                 }
             })
-            .filter((playlist) => Boolean(playlist.id))
+            .filter(Boolean)
     }
 
     async function loadUserPlaylists() {
@@ -409,10 +394,7 @@ export const sessionService = (() => {
 
             const parsed = JSON.parse(raw)
             const normalized = normalizeUserPlaylists(parsed, { initializeMissingCovers: true })
-            const initializedCovers = normalized.some(
-                (playlist, index) => playlist.cover && !resolveStoredPlaylistCover(parsed[index]),
-            )
-            if (raw.includes(EMBEDDED_IMAGE_PREFIX) || initializedCovers) {
+            if (JSON.stringify(normalized) !== raw) {
                 compactStorageValue(USER_PLAYLISTS_KEY, normalized)
             }
             return normalized
@@ -507,14 +489,6 @@ export const sessionService = (() => {
         return saved ? newPlaylist : null
     }
 
-    async function createPlaylistAndAddTrack({ name, banner = '', track }) {
-        return createUserPlaylistWithTracks({
-            name,
-            banner,
-            tracks: [track],
-        })
-    }
-
     async function createUserPlaylistWithTracks({ name, banner = '', tracks = [] }) {
         const normalizedTracks = tracks.map((track) => normalizeTrackRecord(track)).filter(Boolean)
 
@@ -561,7 +535,7 @@ export const sessionService = (() => {
 
             const parsed = JSON.parse(raw)
             const normalized = normalizeRecentFolderPlaylists(parsed)
-            if (raw.includes(EMBEDDED_IMAGE_PREFIX)) {
+            if (JSON.stringify(normalized) !== raw) {
                 compactStorageValue(RECENT_FOLDER_PLAYLISTS_KEY, normalized)
             }
             return normalized
@@ -635,18 +609,14 @@ export const sessionService = (() => {
         loadPlaylist,
         savePlaylist,
         loadRecentTracks,
-        saveRecentTracks,
         prependRecentTrack,
-        approveRecentAudioPath,
         loadUserPlaylists,
         saveUserPlaylists,
         addTrackToUserPlaylist,
         addTracksToUserPlaylist,
         createUserPlaylist,
         createUserPlaylistWithTracks,
-        createPlaylistAndAddTrack,
         loadRecentFolderPlaylists,
-        saveRecentFolderPlaylists,
         prependRecentFolderPlaylist,
     }
 })()

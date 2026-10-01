@@ -1,6 +1,5 @@
-import { House, ListVideo, ScrollText, LibraryIcon } from 'lucide-react'
-import React from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { House, ListVideo, ScrollText, LibraryIcon, Download } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 const navItems = [
     {
@@ -22,6 +21,11 @@ const navItems = [
         label: 'About',
         path: '/about',
         icon: <ScrollText className="w-5 h-5" />,
+    },
+    {
+        label: 'External Tools',
+        path: '/bonus',
+        icon: <Download className="w-5 h-5" />,
     },
 ]
 

@@ -3,7 +3,6 @@ export const playerState = (() => {
         playlist: [],
         currentTrackIndex: -1,
         isPlaying: false,
-        loopEnabled: false,
         progress: {
             currentTime: 0,
             duration: 0,
@@ -24,10 +23,9 @@ export const playerState = (() => {
             playlist: state.playlist,
             currentTrackIndex: state.currentTrackIndex,
             isPlaying: state.isPlaying,
-            loopEnabled: state.loopEnabled,
-            progress: { ...state.progress },
+            progress: state.progress,
             volume: state.volume,
-            currentTrack: { ...state.currentTrack },
+            currentTrack: state.currentTrack,
         }
     }
 
@@ -83,20 +81,6 @@ export const playerState = (() => {
         notify()
     }
 
-    function setLoopEnabled(value) {
-        const nextValue = Boolean(value)
-        if (state.loopEnabled === nextValue) {
-            return
-        }
-
-        state.loopEnabled = nextValue
-        notify()
-    }
-
-    function toggleLoopEnabled() {
-        setLoopEnabled(!state.loopEnabled)
-    }
-
     function setCurrentTrack(track) {
         const nextTrack = { ...state.currentTrack, ...(track || {}) }
         if (
@@ -140,21 +124,6 @@ export const playerState = (() => {
         notify()
     }
 
-    function reset() {
-        state.playlist = []
-        state.currentTrackIndex = -1
-        state.isPlaying = false
-        state.loopEnabled = false
-        state.progress = { currentTime: 0, duration: 0, percent: 0 }
-        state.currentTrack = {
-            filePath: null,
-            title: 'No song selected',
-            artist: 'Unknown artist',
-            image: null,
-        }
-        notify()
-    }
-
     return {
         getState: createStateSnapshot,
         setPlaylist,
@@ -163,9 +132,6 @@ export const playerState = (() => {
         setProgress,
         setCurrentTrack,
         setVolume,
-        setLoopEnabled,
-        toggleLoopEnabled,
-        reset,
         subscribe,
     }
 })()
