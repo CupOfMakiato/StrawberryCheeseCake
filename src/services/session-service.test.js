@@ -71,3 +71,49 @@ test('user playlists persist normalized, deduplicated tracks in order', async ()
         }
     }
 })
+
+test('creating from Recent saves selected tracks, cover, and failures without a partial playlist', async () => {
+    const storage = new Map()
+    const previousWindow = globalThis.window
+    const originalError = console.error
+    globalThis.window = {
+        localStorage: {
+            getItem: (key) => storage.get(key) ?? null,
+            setItem: (key, value) => storage.set(key, value),
+        },
+        dispatchEvent: () => true,
+    }
+    try {
+        const { sessionService } = await import('./session-service.js')
+        const track = { filePath: 'C:\\Music\\one.mp3', title: 'One', image: 'C:/Artwork/one.webp' }
+        const created = await sessionService.createUserPlaylistWithTracks({
+            name: '  From Recent  ',
+            tracks: [track, track, 'C:\\Music\\two.wav'],
+        })
+        assert.equal(created.name, 'From Recent')
+        assert.equal(created.cover, track.image)
+        assert.deepEqual(
+            created.tracks.map((item) => item.filePath),
+            [track.filePath, 'C:\\Music\\two.wav'],
+        )
+        assert.deepEqual((await sessionService.loadUserPlaylists())[0], created)
+        assert.equal(
+            await sessionService.createUserPlaylistWithTracks({ name: 'Empty', tracks: [] }),
+            null,
+        )
+        const beforeFailure = [...storage.entries()]
+        globalThis.window.localStorage.setItem = () => {
+            throw new Error('Synthetic storage failure')
+        }
+        console.error = () => {}
+        assert.equal(
+            await sessionService.createUserPlaylistWithTracks({ name: 'Failed', tracks: [track] }),
+            null,
+        )
+        assert.deepEqual([...storage.entries()], beforeFailure)
+    } finally {
+        console.error = originalError
+        if (previousWindow === undefined) delete globalThis.window
+        else globalThis.window = previousWindow
+    }
+})

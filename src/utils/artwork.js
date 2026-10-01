@@ -1,4 +1,4 @@
-import { resolveTrackImage } from './playlist-media.js'
+import { resolvePlaylistImage, resolveTrackImage } from './playlist-media.js'
 import { resolveImageSource } from './file-path.js'
 import { normalizeTrackRecord } from './track-record.js'
 import { audioService as defaultAudioService } from '../services/audio-service.js'
@@ -22,4 +22,11 @@ export async function resolveTrackArtwork(track, { audioService = defaultAudioSe
         includeImage: true,
     })
     return resolveImageSource(metadata?.image)
+}
+
+export async function resolvePlaylistArtwork(playlist) {
+    const existingImage = resolvePlaylistImage(playlist)
+    if (existingImage) return resolveImageSource(existingImage)
+    const firstTrack = playlist?.tracks?.find((track) => normalizeTrackRecord(track)?.filePath)
+    return firstTrack ? resolveTrackArtwork(firstTrack) : ''
 }

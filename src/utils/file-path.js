@@ -47,11 +47,8 @@ export function resolveImageSource(value) {
     }
 
     if (
-        /^(data:|blob:|https?:|asset:)/i.test(src)
-        // ||
-        // src.startsWith('/assets/') ||
-        // src.startsWith('./assets/') ||
-        // src.startsWith('../assets/')
+        /^(data:|blob:|https?:|asset:)/i.test(src) ||
+        /^(\/(src|assets)\/|\.{1,2}\/assets\/)/.test(src)
     ) {
         return src
     }

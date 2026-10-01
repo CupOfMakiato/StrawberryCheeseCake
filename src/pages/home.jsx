@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { readDir, stat } from '@tauri-apps/plugin-fs'
 import { join } from '@tauri-apps/api/path'
-import musicPlaceholder from '../assets/IMG_6103.webp'
+import musicPlaceholder from '../assets/music-placeholder.png'
 import { audioService } from '../services/audio-service'
 import { sessionService } from '../services/session-service'
 import { trackMetadataService } from '../services/track-metadata-service'
 import { playerState } from '../utils/player-state'
 import Recent from '../components/recent'
+import { musicSurfaceClasses } from '../components/music-ui'
 import { getBaseName, resolveImageSource } from '../utils/file-path'
 import { resolveTrackArtwork } from '../utils/artwork'
 
@@ -72,27 +73,33 @@ const CurrentTrackPreview = () => {
     return (
         <>
             <img
-                className="coverImage w-72 h-72 rounded-lg object-cover mb-3"
+                className="homeTrackCover block size-75 max-w-full rounded-lg object-contain"
                 src={coverSrc}
                 alt="Album cover"
                 draggable={false}
+                onError={(event) => {
+                    event.currentTarget.onerror = null
+                    event.currentTarget.src = musicPlaceholder
+                }}
             />
-            <h2 id="trackTitle" className="mt-2 mb-2 font-semibold text-[1.25rem]">
+            <h2 id="trackTitle" className="my-[0.83em] text-[24px] font-bold">
                 {currentTrack.title || 'No track selected'}
             </h2>
-            <p className="trackArtist -mt-1">
-                {currentTrack.artist || 'Select a file to start playing'}
-            </p>
+            <p className="my-[1em]">{currentTrack.artist || 'Select a file to start playing'}</p>
         </>
     )
 }
 
 const Home = () => {
+    const [error, setError] = useState('')
+
     async function selectFile() {
+        setError('')
         try {
             const selectedPath = await open({
                 title: 'Select an audio file',
                 multiple: false,
+                filters: [{ name: 'Audio files', extensions: ['mp3', 'wav'] }],
             })
 
             if (typeof selectedPath === 'string' && selectedPath) {
@@ -100,10 +107,12 @@ const Home = () => {
             }
         } catch (error) {
             console.error('Failed to select audio file:', error)
+            setError('Could not open the audio file. Please try again.')
         }
     }
 
     async function selectFolder() {
+        setError('')
         try {
             const selectedFolder = await open({
                 title: 'Select an audio folder',
@@ -118,7 +127,7 @@ const Home = () => {
             const entries = await readDir(selectedFolder)
             const fileEntries = await Promise.all(
                 entries
-                    .filter((entry) => entry?.isFile && entry.name)
+                    .filter((entry) => entry?.isFile && /\.(mp3|wav)$/i.test(entry.name || ''))
                     .map(async (entry) => {
                         const filePath = await join(selectedFolder, entry.name)
                         const fileInfo = await stat(filePath)
@@ -136,6 +145,8 @@ const Home = () => {
                 .map((entry) => entry.filePath)
             const playlistPaths = audioService.startPlaylist(orderedPaths)
 
+            if (!playlistPaths.length) setError('No MP3 or WAV files found. Select another folder.')
+
             if (playlistPaths.length) {
                 await sessionService.prependRecentFolderPlaylist({
                     folderPath: selectedFolder,
@@ -145,16 +156,19 @@ const Home = () => {
             }
         } catch (error) {
             console.error('Failed to select audio folder:', error)
+            setError('Could not open the audio folder. Please try again.')
         }
     }
 
     return (
-        <main className="app-scroll space-y-6">
+        <main className={`homePage ${musicSurfaceClasses}`}>
             <Recent />
-            <CurrentTrackPreview />
-            <div className="controls gap-2 flex">
+            <section className="homeCurrentTrack" aria-label="Current track">
+                <CurrentTrackPreview />
+            </section>
+            <div className="homeFileControls flex gap-1">
                 <button
-                    className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-2 border border-gray-400 rounded shadow"
+                    className="rounded-xs border-2 border-[ButtonBorder] [border-style:outset] bg-[ButtonFace] px-1.5 py-px font-[Arial,sans-serif] text-[13.3333px] text-[ButtonText] active:[border-style:inset]"
                     id="selectFile"
                     type="button"
                     onClick={selectFile}
@@ -162,7 +176,7 @@ const Home = () => {
                     Select File
                 </button>
                 <button
-                    className="bg-white hover:bg-gray-100 text-gray-800 font-semibold py-2 px-2 border border-gray-400 rounded shadow"
+                    className="rounded-xs border-2 border-[ButtonBorder] [border-style:outset] bg-[ButtonFace] px-1.5 py-px font-[Arial,sans-serif] text-[13.3333px] text-[ButtonText] active:[border-style:inset]"
                     id="selectFolder"
                     type="button"
                     onClick={selectFolder}
@@ -170,6 +184,14 @@ const Home = () => {
                     Select Folder
                 </button>
             </div>
+            {error && (
+                <p
+                    className="playlistActionError mt-2.5 text-[14px] text-(--hover-color)"
+                    role="alert"
+                >
+                    {error}
+                </p>
+            )}
         </main>
     )
 }

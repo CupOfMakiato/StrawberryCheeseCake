@@ -1,263 +1,325 @@
 import { useEffect, useState } from 'react'
-import { Ellipsis, Music4Icon, Play } from 'lucide-react'
-import musicPlaceholder from '../assets/IMG_6103.webp'
+import { Ellipsis } from 'lucide-react'
 import { audioService } from '../services/audio-service'
 import { sessionService } from '../services/session-service'
-import { resolveTrackArtwork } from '../utils/artwork'
-import { resolveImageSource } from '../utils/file-path'
+import MusicArtwork from './music-artwork'
+import { FloatingMenu, PlaylistDialog } from './playlist-actions'
 
-const TAB_KEYS = {
-    ALL: 'all',
-    TRACKS: 'tracks',
-    PLAYLISTS: 'playlists',
-}
+const TABS = [
+    ['all', 'All'],
+    ['playlist', 'Recent Playlists'],
+    ['music', 'Recent Music'],
+]
+const REFRESH_EVENTS = [
+    'recent-tracks:updated',
+    'recent-folder-playlists:updated',
+    'user-playlists:updated',
+]
 
-const Recent = () => {
-    const [activeTab, setActiveTab] = useState(TAB_KEYS.ALL)
+export default function Recent() {
+    const [activeTab, setActiveTab] = useState('all')
     const [recentTracks, setRecentTracks] = useState([])
     const [recentPlaylists, setRecentPlaylists] = useState([])
-    const [trackImages, setTrackImages] = useState({})
+    const [userPlaylists, setUserPlaylists] = useState([])
     const [isLoading, setIsLoading] = useState(true)
+    const [error, setError] = useState('')
+    const [menu, setMenu] = useState(null)
+    const [dialog, setDialog] = useState(null)
 
     useEffect(() => {
-        let isMounted = true
-
-        async function loadRecentData({ showLoading = false } = {}) {
-            if (showLoading) {
-                setIsLoading(true)
-            }
+        let mounted = true
+        let version = 0
+        async function refresh() {
+            const request = ++version
             try {
-                const [tracks, playlists] = await Promise.all([
-                    typeof sessionService.loadRecentTracks === 'function'
-                        ? sessionService.loadRecentTracks()
-                        : [],
-                    typeof sessionService.loadRecentFolderPlaylists === 'function'
-                        ? sessionService.loadRecentFolderPlaylists()
-                        : [],
+                const [tracks, folders, playlists] = await Promise.all([
+                    sessionService.loadRecentTracks(),
+                    sessionService.loadRecentFolderPlaylists(),
+                    sessionService.loadUserPlaylists(),
                 ])
-
-                if (!isMounted) {
-                    return
-                }
-
-                const normalizedTracks = Array.isArray(tracks) ? tracks : []
-                setRecentTracks(normalizedTracks)
-                setRecentPlaylists(Array.isArray(playlists) ? playlists : [])
-                hydrateTrackImages(normalizedTracks)
-            } catch (error) {
-                console.error('Failed to load recent data:', error)
+                if (!mounted || request !== version) return
+                setRecentTracks(tracks.filter((track) => track?.filePath))
+                setRecentPlaylists(folders.filter((folder) => folder.tracks?.length))
+                setUserPlaylists(playlists)
+                setMenu(null)
+                setError('')
+            } catch {
+                if (mounted && request === version)
+                    setError('Could not load recent items. Please try again.')
             } finally {
-                if (isMounted && showLoading) {
-                    setIsLoading(false)
-                }
+                if (mounted && request === version) setIsLoading(false)
             }
         }
-
-        async function hydrateTrackImages(tracks) {
-            if (!Array.isArray(tracks) || tracks.length === 0) {
-                return
-            }
-
-            const missingArtwork = tracks.filter(
-                (track) => track?.filePath && !track.image && !trackImages[track.filePath],
-            )
-
-            await Promise.all(
-                missingArtwork.map(async (track) => {
-                    try {
-                        const artwork = await resolveTrackArtwork(track)
-                        if (artwork && track.filePath) {
-                            setTrackImages((prev) => ({
-                                ...prev,
-                                [track.filePath]: artwork,
-                            }))
-                        }
-                    } catch (error) {
-                        console.error('Failed to resolve track artwork:', error)
-                    }
-                }),
-            )
-        }
-
-        loadRecentData({ showLoading: true })
-
-        const refreshRecentTracks = () => {
-            if (isMounted) {
-                loadRecentData()
-            }
-        }
-
-        window.addEventListener('recent-tracks:updated', refreshRecentTracks)
-        window.addEventListener('recent-folder-playlists:updated', refreshRecentTracks)
-
+        refresh()
+        REFRESH_EVENTS.forEach((event) => window.addEventListener(event, refresh))
         return () => {
-            isMounted = false
-            window.removeEventListener('recent-tracks:updated', refreshRecentTracks)
-            window.removeEventListener('recent-folder-playlists:updated', refreshRecentTracks)
+            mounted = false
+            REFRESH_EVENTS.forEach((event) => window.removeEventListener(event, refresh))
         }
     }, [])
 
-    const trackCount = recentTracks.length
-    const playlistCount = recentPlaylists.length
-    const limitedTracks = recentTracks.slice(0, 6)
-    const limitedPlaylists = recentPlaylists.slice(0, 5)
-    const showTracks = activeTab === TAB_KEYS.TRACKS
-    const showPlaylists = activeTab === TAB_KEYS.PLAYLISTS
-
-    function renderTabButton(key, label) {
-        const isActive = activeTab === key
-        return (
-            <button
-                key={key}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-sm font-semibold transition-colors ${
-                    isActive
-                        ? 'border-[#962e4a] bg-[#d5194b] text-white hover:bg-[#ac1c42]'
-                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                }`}
-                onClick={() => setActiveTab(key)}
-            >
-                {label}
-            </button>
-        )
+    function selectTab(key) {
+        setActiveTab(key)
+        setMenu(null)
     }
 
-    function renderTrackRow(track, index) {
-        const artworkSrc =
-            resolveImageSource(track.image || trackImages[track.filePath]) || musicPlaceholder
+    function toggleMenu(event, item) {
+        const anchor = event.currentTarget
+        setMenu((previous) => (previous?.anchor === anchor ? null : { anchor, ...item }))
+    }
 
+    async function openDialog(kind) {
+        const item = menu
+        setMenu(null)
+        if (kind === 'select') {
+            const playlists = await sessionService.loadUserPlaylists()
+            setDialog(
+                playlists.length
+                    ? { kind, ...item, playlists }
+                    : {
+                          kind: 'notice',
+                          message: 'No playlists found. Please create a new playlist first.',
+                      },
+            )
+        } else setDialog({ kind, ...item })
+    }
+
+    function renderTracks() {
+        if (!recentTracks.length)
+            return (
+                <p className="noRecentMusic my-[1em] p-5 text-center text-[14px] text-[#667085]">
+                    No recently played tracks
+                </p>
+            )
         return (
-            <li
-                key={`${track.filePath}-${index}`}
-                className="group flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2.5 shadow-sm"
-            >
-                <div className="relative h-10 w-10 shrink-0">
-                    <img
-                        src={artworkSrc}
-                        alt={track.title || 'Track cover'}
-                        className="h-10 w-10 rounded-lg object-cover"
-                    />
-                    <button
-                        type="button"
-                        aria-label={`Play ${track.title || 'track'}`}
-                        className="absolute inset-0 flex items-center justify-center rounded-lg bg-slate-950/55 text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
-                        onClick={() => audioService.startSingleTrack(track.filePath)}
+            <ul className="recentMusicList m-0 max-h-75 list-none overflow-y-auto p-0">
+                {recentTracks.map((track) => (
+                    <li
+                        className="recentTrack relative z-1 mb-2 flex cursor-pointer gap-3 rounded p-2 transition-[background-color] duration-200 ease-[ease] hover:bg-[#f0f0f0] motion-reduce:transition-none"
+                        key={track.filePath}
                     >
-                        <Play size={16} fill="currentColor" aria-hidden="true" />
-                    </button>
-                </div>
-                <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-slate-900">
-                        {track.title || 'Unknown title'}
-                    </div>
-                    <div className="truncate text-xs text-slate-500">
-                        {track.artist || 'Unknown artist'}
-                    </div>
-                </div>
-                <button
-                    type="button"
-                    aria-label={`Options for ${track.title || 'track'}`}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                >
-                    <Ellipsis size={18} aria-hidden="true" />
-                </button>
-            </li>
-        )
-    }
-
-    function renderPlaylistRow(playlist, index) {
-        return (
-            <li
-                key={`${playlist.id || playlist.folderPath || index}`}
-                className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-2.5 py-2.5 shadow-sm"
-            >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-[#d5194b]">
-                    <Music4Icon size={22} aria-hidden="true" />
-                </div>
-                <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-slate-900">
-                        {playlist.name || 'Untitled playlist'}
-                    </div>
-                    <div className="text-xs text-slate-500">
-                        {Array.isArray(playlist.tracks) ? playlist.tracks.length : 0} tracks
-                    </div>
-                </div>
-                <button
-                    type="button"
-                    aria-label={`Options for ${playlist.name || 'playlist'}`}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                >
-                    <Ellipsis size={18} aria-hidden="true" />
-                </button>
-            </li>
-        )
-    }
-
-    function renderContent() {
-        if (isLoading) {
-            return <div className="text-sm text-slate-500">Loading recent items…</div>
-        }
-
-        if (showTracks) {
-            if (trackCount === 0) {
-                return <div className="text-sm text-slate-500">No recent music yet.</div>
-            }
-            return <ul className="space-y-3">{limitedTracks.map(renderTrackRow)}</ul>
-        }
-
-        if (showPlaylists) {
-            if (playlistCount === 0) {
-                return <div className="text-sm text-slate-500">No recent playlists yet.</div>
-            }
-            return <ul className="space-y-3">{limitedPlaylists.map(renderPlaylistRow)}</ul>
-        }
-
-        return (
-            <div className="space-y-4">
-                <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">Recent Playlists</p>
-                    {playlistCount === 0 ? (
-                        <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                            No recent playlists yet.
+                        <button
+                            className="recentTrackPlay m-0 flex min-w-0 flex-1 gap-3 border-0 bg-transparent p-0 text-left text-inherit"
+                            type="button"
+                            aria-label={`Play ${track.title}`}
+                            onClick={() => audioService.startSingleTrack(track.filePath)}
+                        >
+                            <span className="trackCover size-12.5 shrink-0">
+                                <MusicArtwork
+                                    className="size-full rounded object-cover"
+                                    track={track}
+                                    alt={track.title}
+                                />
+                            </span>
+                            <span className="trackDetails min-w-0 flex-1">
+                                <span className="trackTitle block truncate text-[13px] font-bold">
+                                    {track.title}
+                                </span>
+                                <span className="trackArtist block truncate text-[12px] text-[#666]">
+                                    {track.artist}
+                                </span>
+                            </span>
+                        </button>
+                        <div className="trackMoreActions relative z-2 ml-2 flex items-start">
+                            <button
+                                className="trackMoreBtn inline-flex size-8.5 items-center justify-center rounded-lg border border-[#d6dbe3] bg-white font-[Arial,sans-serif] leading-[normal] hover:bg-[#f5f7fa]"
+                                type="button"
+                                aria-label={`Playlist actions for ${track.title}`}
+                                aria-haspopup="menu"
+                                aria-expanded={menu?.track?.filePath === track.filePath}
+                                onClick={(event) => toggleMenu(event, { track })}
+                            >
+                                <Ellipsis size={24} aria-hidden="true" />
+                            </button>
                         </div>
-                    ) : (
-                        <ul className="space-y-3">{limitedPlaylists.map(renderPlaylistRow)}</ul>
-                    )}
-                </div>
-
-                <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">Recent Music</p>
-                    {trackCount === 0 ? (
-                        <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                            No recent music yet.
-                        </div>
-                    ) : (
-                        <ul className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-                            {limitedTracks.map(renderTrackRow)}
-                        </ul>
-                    )}
-                </div>
-            </div>
+                    </li>
+                ))}
+            </ul>
         )
     }
+
+    function renderPlaylists() {
+        if (!recentPlaylists.length)
+            return (
+                <p className="noRecentPlaylists my-[1em] p-5 text-center text-[14px] text-[#667085]">
+                    No recent playlists yet. Use Select Folder to create one.
+                </p>
+            )
+        return (
+            <ul className="recentPlaylistList m-0 grid max-h-70 list-none gap-2.5 overflow-y-auto p-0">
+                {recentPlaylists.map((folder) => (
+                    <li
+                        className="recentPlaylistCard relative flex items-center gap-2.5 rounded-[10px] border border-[#d9dee7] bg-white p-2.5 max-[780px]:flex-wrap"
+                        key={folder.id || folder.folderPath}
+                    >
+                        <MusicArtwork
+                            className="recentPlaylistCover size-13 shrink-0 rounded-lg object-cover"
+                            playlist={folder}
+                            alt={folder.name}
+                        />
+                        <div className="recentPlaylistInfo min-w-0 flex-1 max-[420px]:flex-[1_1_140px]">
+                            <p className="recentPlaylistName m-0 truncate text-[14px] font-bold">
+                                {folder.name}
+                            </p>
+                            <p className="recentPlaylistMeta mt-0.75 mb-0 text-[12px] text-[#5f6877]">
+                                {folder.tracks.length} songs
+                            </p>
+                        </div>
+                        <div className="recentPlaylistActions relative ml-2 inline-flex items-center gap-2 max-[780px]:ml-0 max-[420px]:ml-auto">
+                            <button
+                                className="recentPlaylistViewBtn min-h-8 rounded-lg border border-[#d6dbe3] bg-white px-2.5 py-0 font-[Arial,sans-serif] text-[12px] leading-[normal] font-semibold text-[#263244] hover:bg-[color-mix(in_srgb,var(--accent-color)_5%,white)]"
+                                type="button"
+                                onClick={() => setDialog({ kind: 'view', folder })}
+                            >
+                                View Songs
+                            </button>
+                            <button
+                                className="recentFolderMoreBtn inline-flex size-8.5 items-center justify-center rounded-lg border border-[#d6dbe3] bg-white font-[Arial,sans-serif] leading-[normal] hover:bg-[#f5f7fa]"
+                                type="button"
+                                aria-label={`Folder playlist actions for ${folder.name}`}
+                                aria-haspopup="menu"
+                                aria-expanded={menu?.folder?.folderPath === folder.folderPath}
+                                onClick={(event) => toggleMenu(event, { folder })}
+                            >
+                                <Ellipsis size={24} aria-hidden="true" />
+                            </button>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        )
+    }
+
+    const menuItems = menu?.folder
+        ? [
+              {
+                  label: 'Add All to Playlist',
+                  className: 'addAllToPlaylistBtn',
+                  onSelect: () => openDialog('select'),
+              },
+              {
+                  label: 'Create New Playlist',
+                  className: 'createPlaylistFromFolderBtn',
+                  onSelect: () => openDialog('create'),
+              },
+          ]
+        : [
+              ...(userPlaylists.length
+                  ? [
+                        {
+                            label: 'Add to Playlist',
+                            className: 'addToPlaylistBtn',
+                            onSelect: () => openDialog('select'),
+                        },
+                    ]
+                  : []),
+              {
+                  label: 'Create New Playlist',
+                  className: 'createPlaylistBtn',
+                  onSelect: () => openDialog('create'),
+              },
+          ]
 
     return (
-        <section className="recent-music space-y-4 border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-2">
-                <div>
-                    <p className="text-sm font-semibold text-slate-900">Recently Played</p>
-                </div>
-
-                <div className="flex items-center gap-2 p-1">
-                    {renderTabButton(TAB_KEYS.ALL, 'All')}
-                    {renderTabButton(TAB_KEYS.PLAYLISTS, 'Recent Playlists')}
-                    {renderTabButton(TAB_KEYS.TRACKS, 'Recent Music')}
-                </div>
+        <section className="recentMusic border-t border-[#ccc] p-4">
+            <h2 className="m-0 mb-3 text-[16px] font-semibold">Recently Played</h2>
+            <div
+                className="recentTabs mb-3 flex gap-2 max-[420px]:flex-wrap"
+                role="tablist"
+                aria-label="Recent views"
+            >
+                {TABS.map(([key, label], index) => (
+                    <button
+                        key={key}
+                        id={`recent-tab-${key}`}
+                        className={`recentTabBtn min-h-9.5 rounded-[10px] border px-1.5 py-0.5 font-[Arial,sans-serif] text-[13px] leading-[normal] font-semibold ${activeTab === key ? 'is-active border-(--accent-color) bg-[color-mix(in_srgb,var(--accent-color)_10%,white)] text-(--accent-color)' : 'border-[#d6dbe3] bg-white text-[#243041] hover:bg-[#f5f7fa]'}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === key}
+                        aria-controls="recentTabPanel"
+                        tabIndex={activeTab === key ? 0 : -1}
+                        onClick={() => selectTab(key)}
+                        onKeyDown={(event) => {
+                            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
+                                return
+                            event.preventDefault()
+                            const next =
+                                event.key === 'Home'
+                                    ? 0
+                                    : event.key === 'End'
+                                      ? 2
+                                      : (index + (event.key === 'ArrowRight' ? 1 : -1) + 3) % 3
+                            selectTab(TABS[next][0])
+                            document.getElementById(`recent-tab-${TABS[next][0]}`)?.focus()
+                        }}
+                    >
+                        {label}
+                    </button>
+                ))}
             </div>
-
-            <div className="space-y-4">{renderContent()}</div>
+            <div
+                className="recentTabContent grid gap-3.5"
+                id="recentTabPanel"
+                role="tabpanel"
+                aria-labelledby={`recent-tab-${activeTab}`}
+                aria-busy={isLoading}
+            >
+                {isLoading ? (
+                    <p className="recentLoading text-[14px] text-[#667085]" role="status">
+                        Loading recent items...
+                    </p>
+                ) : error ? (
+                    <p
+                        className="playlistActionError mt-2.5 text-[14px] text-(--hover-color)"
+                        role="alert"
+                    >
+                        {error}
+                    </p>
+                ) : (
+                    <>
+                        {activeTab !== 'music' && (
+                            <section className="recentSection grid gap-2">
+                                {activeTab === 'all' && (
+                                    <h3 className="recentSectionTitle m-0 text-[11px] font-bold tracking-[0.08em] text-[#5a6474] uppercase">
+                                        Recent Playlists
+                                    </h3>
+                                )}
+                                {renderPlaylists()}
+                            </section>
+                        )}
+                        {activeTab !== 'playlist' && (
+                            <section className="recentSection grid gap-2">
+                                {activeTab === 'all' && (
+                                    <h3 className="recentSectionTitle m-0 text-[11px] font-bold tracking-[0.08em] text-[#5a6474] uppercase">
+                                        Recent Music
+                                    </h3>
+                                )}
+                                {renderTracks()}
+                            </section>
+                        )}
+                    </>
+                )}
+            </div>
+            {menu && (
+                <FloatingMenu
+                    anchor={menu.anchor}
+                    className={
+                        menu.folder
+                            ? 'recentFolderActionsMenu min-w-52.5'
+                            : 'trackActionsMenu min-w-47.5'
+                    }
+                    items={menuItems}
+                    onClose={() => setMenu(null)}
+                />
+            )}
+            {dialog && (
+                <PlaylistDialog
+                    key={dialog.kind}
+                    action={dialog}
+                    onClose={() => setDialog(null)}
+                    onNotice={(message) => setDialog({ kind: 'notice', message })}
+                />
+            )}
         </section>
     )
 }
-
-export default Recent
