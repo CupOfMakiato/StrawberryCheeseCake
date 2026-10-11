@@ -1,7 +1,7 @@
-import { resolvePlaylistImage, resolveTrackImage } from './playlist-media.js'
-import { resolveImageSource } from './file-path.js'
-import { normalizeTrackRecord } from './track-record.js'
-import { audioService as defaultAudioService } from '../services/audio-service.js'
+import { resolvePlaylistImage, resolveTrackImage } from '../utils/playlist-media.js'
+import { resolveImageSource } from '../utils/file-path.js'
+import { normalizeTrackRecord } from '../utils/track-record.js'
+import { audioService as defaultAudioService } from './audio-service.js'
 
 export async function resolveTrackArtwork(track, { audioService = defaultAudioService } = {}) {
     const normalizedTrack = normalizeTrackRecord(track)

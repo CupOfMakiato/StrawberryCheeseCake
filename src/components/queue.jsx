@@ -3,7 +3,7 @@ import { Play } from 'lucide-react'
 import musicPlaceholder from '../assets/IMG_6103.webp'
 import { audioService } from '../services/audio-service'
 import { playerState } from '../utils/player-state'
-import { resolveTrackArtwork } from '../utils/artwork'
+import { resolveTrackArtwork } from '../services/artwork-service'
 import { DEFAULT_TRACK_ARTIST, DEFAULT_TRACK_TITLE } from '../utils/track-record'
 import { resolveImageSource } from '../utils/file-path'
 
@@ -25,16 +25,17 @@ function isSameQueueSnapshot(previous, next) {
     )
 }
 
-function getTrackData(filePath, snapshot) {
+function getTrackData(filePath, currentTrack) {
     const track = audioService.getTrackDisplayData(filePath)
-    return snapshot?.currentTrack?.filePath === filePath
-        ? { ...track, ...snapshot.currentTrack, filePath }
+    return currentTrack?.filePath === filePath
+        ? { ...track, ...currentTrack, filePath }
         : { ...track, filePath }
 }
 
 const Queue = () => {
     const [snapshot, setSnapshot] = useState(getQueueSnapshot)
     const [artworkByPath, setArtworkByPath] = useState({})
+    const currentTrack = snapshot.currentTrack
 
     useEffect(
         () =>
@@ -75,12 +76,12 @@ const Queue = () => {
         const missing = visibleTracks.filter(
             ({ filePath }) =>
                 filePath &&
-                !artworkByPath[filePath] &&
-                !resolveImageSource(getTrackData(filePath, snapshot).image),
+                !resolveImageSource(getTrackData(filePath, currentTrack).image),
         )
 
         async function hydrateArtwork() {
             for (const { filePath } of missing) {
+                if (cancelled) return
                 try {
                     const artwork = await resolveTrackArtwork({ filePath })
                     if (!cancelled && artwork) {
@@ -97,10 +98,10 @@ const Queue = () => {
         return () => {
             cancelled = true
         }
-    }, [visibleTracks, snapshot, artworkByPath])
+    }, [visibleTracks, currentTrack])
 
     function renderQueueItem({ filePath, index, active = false }) {
-        const track = getTrackData(filePath, snapshot)
+        const track = getTrackData(filePath, currentTrack)
         const title = track.title || DEFAULT_TRACK_TITLE
         const artist = track.artist || DEFAULT_TRACK_ARTIST
         const coverSrc =

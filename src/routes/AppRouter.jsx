@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Routes, Route, useLocation } from 'react-router-dom'
 import Home from '../pages/home'
-import About from '../pages/about'
-import Queue from '../components/queue'
-import Library from '../pages/library'
-import Playlist from '../pages/playlist'
-import Bonus from '../pages/bonus'
+
+const About = lazy(() => import('../pages/about'))
+const Queue = lazy(() => import('../components/queue'))
+const Library = lazy(() => import('../pages/library'))
+const Playlist = lazy(() => import('../pages/playlist'))
+const Bonus = lazy(() => import('../pages/bonus'))
 
 const AppRouter = () => {
     const location = useLocation()
@@ -15,14 +16,22 @@ const AppRouter = () => {
     }, [location.pathname])
 
     return (
-        <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/about" element={<About />} />
-            <Route path="/queue" element={<Queue />} />
-            <Route path="/library" element={<Library />} />
-            <Route path="/playlist/:playlistId" element={<Playlist />} />
-            <Route path="/bonus" element={<Bonus />} />
-        </Routes>
+        <Suspense
+            fallback={
+                <main className="p-4 text-sm text-slate-500" role="status">
+                    Loading page...
+                </main>
+            }
+        >
+            <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/queue" element={<Queue />} />
+                <Route path="/library" element={<Library />} />
+                <Route path="/playlist/:playlistId" element={<Playlist />} />
+                <Route path="/bonus" element={<Bonus />} />
+            </Routes>
+        </Suspense>
     )
 }
 

@@ -15,7 +15,7 @@ import { audioService } from '../services/audio-service'
 import { trackMetadataService } from '../services/track-metadata-service'
 import { formatDurationClock } from '../utils/duration'
 import { resolveImageSource } from '../utils/file-path'
-import { resolveTrackArtwork } from '../utils/artwork'
+import { resolveTrackArtwork } from '../services/artwork-service'
 
 const Player = () => {
     const [currentTrack, setCurrentTrack] = useState(playerState.getState().currentTrack)

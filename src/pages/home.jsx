@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-dialog'
-import { readDir, stat } from '@tauri-apps/plugin-fs'
-import { join } from '@tauri-apps/api/path'
 import musicPlaceholder from '../assets/music-placeholder.png'
 import { audioService } from '../services/audio-service'
+import { getOrderedAudioFiles } from '../services/audio-folder-service'
 import { sessionService } from '../services/session-service'
 import { trackMetadataService } from '../services/track-metadata-service'
 import { playerState } from '../utils/player-state'
 import Recent from '../components/recent'
 import { musicSurfaceClasses } from '../components/music-ui'
 import { getBaseName, resolveImageSource } from '../utils/file-path'
-import { resolveTrackArtwork } from '../utils/artwork'
+import { resolveTrackArtwork } from '../services/artwork-service'
 
 const CurrentTrackPreview = () => {
     const [currentTrack, setCurrentTrack] = useState(playerState.getState().currentTrack)
@@ -124,25 +123,7 @@ const Home = () => {
                 return
             }
 
-            const entries = await readDir(selectedFolder)
-            const fileEntries = await Promise.all(
-                entries
-                    .filter((entry) => entry?.isFile && /\.(mp3|wav)$/i.test(entry.name || ''))
-                    .map(async (entry) => {
-                        const filePath = await join(selectedFolder, entry.name)
-                        const fileInfo = await stat(filePath)
-                        const addedAt = fileInfo?.birthtime || fileInfo?.mtime || 0
-
-                        return {
-                            filePath,
-                            addedAt: new Date(addedAt).getTime() || 0,
-                        }
-                    }),
-            )
-
-            const orderedPaths = fileEntries
-                .sort((a, b) => a.addedAt - b.addedAt)
-                .map((entry) => entry.filePath)
+            const orderedPaths = await getOrderedAudioFiles(selectedFolder)
             const playlistPaths = audioService.startPlaylist(orderedPaths)
 
             if (!playlistPaths.length) setError('No MP3 or WAV files found. Select another folder.')

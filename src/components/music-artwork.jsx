@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import musicPlaceholder from '../assets/music-placeholder.png'
-import { resolvePlaylistArtwork, resolveTrackArtwork } from '../utils/artwork'
+import { resolvePlaylistArtwork, resolveTrackArtwork } from '../services/artwork-service'
 import { resolvePlaylistImage, resolveTrackImage } from '../utils/playlist-media'
 import { resolveImageSource } from '../utils/file-path'
 
