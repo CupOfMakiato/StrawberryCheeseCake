@@ -24,6 +24,7 @@ export default function Library() {
                 if (mounted && request === version) {
                     setPlaylists(stored)
                     setMenu(null)
+                    setError('')
                 }
             } catch {
                 if (mounted && request === version)
@@ -87,7 +88,7 @@ export default function Library() {
                     <p className="libraryEmpty mt-2.5 text-[16px] text-[#667085]" role="status">
                         Loading playlists...
                     </p>
-                ) : !playlists.length ? (
+                ) : error ? null : !playlists.length ? (
                     <p className="libraryEmpty mt-2.5 text-[16px] text-[#667085]">
                         No playlists yet. Use Recent Music → Create New Playlist.
                     </p>

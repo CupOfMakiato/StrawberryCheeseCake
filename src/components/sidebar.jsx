@@ -1,4 +1,4 @@
-import { House, ListVideo, ScrollText, LibraryIcon } from 'lucide-react'
+import { House, ListVideo, ScrollText, LibraryIcon, Download } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 const navItems = [
@@ -22,13 +22,11 @@ const navItems = [
         path: '/about',
         icon: <ScrollText className="w-5 h-5" />,
     },
-    /* Temporarily hidden.
     {
         label: 'External Tools',
         path: '/bonus',
         icon: <Download className="w-5 h-5" />,
     },
-    */
 ]
 
 const Sidebar = () => {

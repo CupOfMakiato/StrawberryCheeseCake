@@ -385,27 +385,31 @@ export const sessionService = (() => {
             .filter(Boolean)
     }
 
+    function readUserPlaylists() {
+        const raw = window.localStorage.getItem(USER_PLAYLISTS_KEY)
+        if (raw === null) return { raw, parsed: [] }
+        const parsed = JSON.parse(raw)
+        if (!Array.isArray(parsed)) throw new Error('Invalid playlist data')
+        return { raw, parsed }
+    }
+
     async function loadUserPlaylists() {
         try {
-            const raw = window.localStorage.getItem(USER_PLAYLISTS_KEY)
-            if (!raw) {
-                return []
-            }
-
-            const parsed = JSON.parse(raw)
+            const { raw, parsed } = readUserPlaylists()
             const normalized = normalizeUserPlaylists(parsed, { initializeMissingCovers: true })
-            if (JSON.stringify(normalized) !== raw) {
+            if (raw !== null && JSON.stringify(normalized) !== raw) {
                 compactStorageValue(USER_PLAYLISTS_KEY, normalized)
             }
             return normalized
         } catch (error) {
             console.error('Failed to load user playlists:', error)
-            return []
+            throw new Error('Could not read saved playlists. Your saved data was not changed.', { cause: error })
         }
     }
 
     async function saveUserPlaylists(playlists) {
         try {
+            readUserPlaylists()
             const normalized = normalizeUserPlaylists(playlists)
             window.localStorage.setItem(USER_PLAYLISTS_KEY, JSON.stringify(normalized))
             window.dispatchEvent(new CustomEvent('user-playlists:updated'))

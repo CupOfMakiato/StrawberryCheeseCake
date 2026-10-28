@@ -72,15 +72,19 @@ export default function Recent() {
         const item = menu
         setMenu(null)
         if (kind === 'select') {
-            const playlists = await sessionService.loadUserPlaylists()
-            setDialog(
-                playlists.length
-                    ? { kind, ...item, playlists }
-                    : {
-                          kind: 'notice',
-                          message: 'No playlists found. Please create a new playlist first.',
-                      },
-            )
+            try {
+                const playlists = await sessionService.loadUserPlaylists()
+                setDialog(
+                    playlists.length
+                        ? { kind, ...item, playlists }
+                        : {
+                              kind: 'notice',
+                              message: 'No playlists found. Please create a new playlist first.',
+                          },
+                )
+            } catch (error) {
+                setDialog({ kind: 'notice', message: error.message })
+            }
         } else setDialog({ kind, ...item })
     }
 

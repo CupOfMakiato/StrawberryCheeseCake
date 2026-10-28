@@ -117,3 +117,39 @@ test('creating from Recent saves selected tracks, cover, and failures without a 
         else globalThis.window = previousWindow
     }
 })
+
+test('unreadable playlist data is preserved and cannot be overwritten', async () => {
+    const previousWindow = globalThis.window
+    const originalError = console.error
+    const key = 'strawberry-cheesecake:user-playlists'
+    const storage = new Map()
+    globalThis.window = {
+        localStorage: {
+            getItem: (item) => storage.get(item) ?? null,
+            setItem: (item, value) => storage.set(item, value),
+        },
+        dispatchEvent: () => true,
+    }
+    console.error = () => {}
+    try {
+        const { sessionService } = await import('./session-service.js')
+        for (const damaged of ['{broken', '{"playlists":[]}', '']) {
+            storage.set(key, damaged)
+            await assert.rejects(sessionService.loadUserPlaylists(), /Could not read saved playlists/)
+            await assert.rejects(sessionService.createUserPlaylist({ name: 'New' }))
+            await assert.rejects(sessionService.createUserPlaylistWithTracks({
+                name: 'New', tracks: ['C:\\Music\\one.mp3'],
+            }))
+            assert.equal(await sessionService.saveUserPlaylists([]), false)
+            assert.equal(storage.get(key), damaged)
+        }
+        globalThis.window.localStorage.getItem = () => { throw new Error('Read failed') }
+        await assert.rejects(sessionService.loadUserPlaylists())
+        assert.equal(await sessionService.saveUserPlaylists([]), false)
+        assert.equal(storage.get(key), '')
+    } finally {
+        console.error = originalError
+        if (previousWindow === undefined) delete globalThis.window
+        else globalThis.window = previousWindow
+    }
+})
